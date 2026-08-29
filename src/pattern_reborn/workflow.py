@@ -337,11 +337,14 @@ class PatternRebornService:
         artwork_path = self._resolve_artifact(project_dir, artwork_id)
         if not artwork_path.is_file():
             raise WorkflowError("贴图纹样不存在。")
+        if artwork_id not in _current_mockup_artwork_ids(project):
+            raise WorkflowError("贴图纹样不是当前确认的重组或生成结果。")
         template = self._mockups.get(template_id)
         if template is None:
             raise WorkflowError("贴图模板不存在。")
-        ai_assisted = artwork_id.startswith("generated/") or any(
+        ai_assisted = artwork_id in project.artifacts.generation or any(
             record.artifact_path == artwork_id for record in project.generations
+            if record.artifact_path not in project.stale_artifacts
         )
         composed = compose_mockup(template, ArtworkRef(path=artwork_path, ai_assisted=ai_assisted))
         version = _next_prefixed_version(project_dir / "mockups", template_id)
@@ -413,6 +416,21 @@ class PatternRebornService:
         if not resolved.is_relative_to(root):
             raise WorkflowError("项目路径超出允许的工作区。")
         return resolved
+
+
+def _current_mockup_artwork_ids(project: ProjectRecord) -> set[str]:
+    stale = set(project.stale_artifacts)
+    ids = {
+        path
+        for path in (*project.artifacts.recomposition, *project.artifacts.generation)
+        if path not in stale
+    }
+    ids.update(
+        record.artifact_path
+        for record in project.generations
+        if record.artifact_path not in stale
+    )
+    return ids
 
 
 def _next_version(folder: Path, suffix: str = ".png") -> int:

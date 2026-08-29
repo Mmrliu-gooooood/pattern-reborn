@@ -165,6 +165,11 @@ class ProjectRepository:
             later_paths = getattr(project.artifacts, later_step.value)
             project.stale_artifacts.extend(later_paths)
             setattr(project.artifacts, later_step.value, [])
+            if later_step is StepId.GENERATION:
+                for record in project.generations:
+                    if record.artifact_path not in project.stale_artifacts:
+                        project.stale_artifacts.append(record.artifact_path)
+                project.generations = []
 
         setattr(project.artifacts, step.value, list(artifact_paths))
         retained_steps = {

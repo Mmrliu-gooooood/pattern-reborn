@@ -151,7 +151,7 @@ class Exporter:
                 )
         if selection.generations:
             used = set()
-            for index, generation in enumerate(project.generations, start=1):
+            for index, generation in enumerate(_current_generations(project), start=1):
                 copied.append(
                     self._copy_asset(
                         generation.artifact_path,
@@ -276,7 +276,7 @@ def _write_manifest(project: ProjectRecord, copied: list[_CopiedFile], package: 
             }
             for item in copied
         ],
-        "generations": [_generation_entry(item) for item in project.generations],
+        "generations": [_generation_entry(item) for item in _current_generations(project)],
     }
     _write_utf8(
         package / "manifest.json",
@@ -313,7 +313,8 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
         f"- 来源分类：{_redact_secrets(_PROVENANCE_ZH[project.provenance])}（{_redact_secrets(project.provenance.value)}）",
         "",
     ]
-    has_ai = bool(project.generations) or any(item.ai_assisted for item in copied)
+    current_generations = _current_generations(project)
+    has_ai = bool(current_generations) or any(item.ai_assisted for item in copied)
     if has_ai:
         lines.extend(
             [
@@ -323,7 +324,7 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
                 "",
             ]
         )
-        for item in project.generations:
+        for item in current_generations:
             lines.extend(
                 [
                     f"- 标识：{_redact_secrets(item.id)}",
@@ -335,6 +336,11 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
                 ]
             )
     _write_utf8(package / "provenance.md", "\n".join(lines))
+
+
+def _current_generations(project: ProjectRecord) -> list[GenerationRecord]:
+    stale = set(project.stale_artifacts)
+    return [item for item in project.generations if item.artifact_path not in stale]
 
 
 def _mockup_ai_assisted(image_path: Path) -> bool:

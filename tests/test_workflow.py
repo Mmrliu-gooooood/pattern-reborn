@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass, StepId
+from pattern_reborn.exporter import ExportSelection
 from pattern_reborn.generation.base import (
     CredentialMode,
     GenerationFailure,
@@ -157,3 +158,52 @@ def test_artifact_path_escape_is_rejected(app_service, source_fixture: Path) -> 
     app_service.confirm_extraction(project.id, extraction.artifact_id)
     with pytest.raises(WorkflowError, match="路径"):
         app_service.make_mockup(project.id, "bookmark", "../outside.png")
+
+
+def test_reconfirm_extraction_does_not_export_stale_generations(
+    app_service,
+    source_fixture: Path,
+) -> None:
+    project = _create(app_service, source_fixture)
+    _confirmed, extraction = _extract_and_confirm(app_service, project.id)
+    app_service.analyze(project.id)
+    app_service.compose(
+        project.id,
+        PatternRequest(layout=LayoutKind.RADIAL, canvas=(128, 128), seed=7),
+    )
+    project_dir = app_service.repository.project_dir(project.id)
+    request = make_generation_request(project_dir / extraction.artifact_id)
+    result = app_service.generate(project.id, request, CredentialMode.PLATFORM, None)
+    generated = Path(result.local_files[0])
+    generated_bytes = generated.read_bytes()
+    generated_id = generated.relative_to(project_dir).as_posix()
+
+    second = app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
+    updated = app_service.confirm_extraction(project.id, second.artifact_id)
+    assert generated_id in updated.stale_artifacts
+    assert all(record.artifact_path not in updated.stale_artifacts for record in updated.generations)
+    assert generated.exists()
+    assert generated.read_bytes() == generated_bytes
+
+    package = app_service.export(
+        project.id,
+        ExportSelection(generations=True, report=True),
+    )
+    generated_dir = package / "generated"
+    exported = list(generated_dir.glob("*.png")) if generated_dir.exists() else []
+    assert exported == []
+
+
+def test_make_mockup_rejects_stale_pattern_after_invalidation(app_service, source_fixture: Path) -> None:
+    project = _create(app_service, source_fixture)
+    _extract_and_confirm(app_service, project.id)
+    app_service.analyze(project.id)
+    pattern = app_service.compose(
+        project.id,
+        PatternRequest(layout=LayoutKind.RADIAL, canvas=(128, 128), seed=7),
+    )
+    assert pattern.path.exists()
+    second = app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
+    app_service.confirm_extraction(project.id, second.artifact_id)
+    with pytest.raises(WorkflowError, match="贴图"):
+        app_service.make_mockup(project.id, "bookmark", pattern.artifact_id)
