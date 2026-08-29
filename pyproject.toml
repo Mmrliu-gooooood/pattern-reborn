@@ -24,6 +24,9 @@ dev = [
     "pytest-cov>=5,<7",
     "respx>=0.21,<1",
 ]
+canvas = [
+    "streamlit-drawable-konva==0.2.2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

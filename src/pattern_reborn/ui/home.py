@@ -55,14 +55,6 @@ def load_validated_demos(demo_root: Path) -> list[DemoCase]:
     return validated
 
 
-def render_studio(_service: PatternRebornService) -> None:
-    st.markdown("创作工坊")
-    if st.button("返回首页"):
-        st.session_state["route"] = "home"
-        st.session_state.pop("project_id", None)
-        st.rerun()
-
-
 def render_home(
     service: PatternRebornService,
     knowledge: KnowledgeCatalog,
@@ -73,6 +65,9 @@ def render_home(
     st.markdown("非遗纹样智能提取与再设计平台")
     if st.button("开始新创作", type="primary"):
         st.session_state["route"] = "studio"
+        st.session_state.pop("project_id", None)
+        st.session_state.pop("selected_category", None)
+        st.session_state.pop("studio_step", None)
         st.rerun()
 
     st.markdown("## 最近项目")

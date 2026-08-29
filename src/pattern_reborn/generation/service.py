@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Protocol
 
 from pydantic import SecretStr
@@ -76,4 +77,22 @@ class GenerationService:
             ) from None
         credential = self._resolver.resolve(request.provider, mode, byok)
         return adapter.generate(request, credential)
+
+
+def build_generation_service(*, config: ProviderConfig, output_dir: Path) -> GenerationService:
+    import httpx
+
+    from pattern_reborn.generation.qwen import QwenAdapter
+    from pattern_reborn.generation.seedream import SeedreamAdapter
+
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    client = httpx.Client(timeout=60.0)
+    seedream = config.provider(ProviderId.SEEDREAM)
+    qwen = config.provider(ProviderId.QWEN)
+    adapters: dict[ProviderId, GenerationAdapter] = {
+        ProviderId.SEEDREAM: SeedreamAdapter(client, seedream.base_url, destination),
+        ProviderId.QWEN: QwenAdapter(client, qwen.base_url, destination),
+    }
+    return GenerationService(adapters, ProviderConfigCredentialResolver(config))
 
