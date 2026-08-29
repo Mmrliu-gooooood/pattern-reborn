@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, Sequence
+from typing import Protocol
 
 import cv2
 import numpy as np
@@ -61,13 +62,17 @@ class SegmentHints:
 
     def __post_init__(self) -> None:
         if self.box is not None:
+            if not _is_public_sequence(self.box):
+                raise SegmentationError("选区必须是坐标序列。")
             if len(self.box) != 4:
-                raise SegmentationError("ROI 必须包含四个坐标。")
+                raise SegmentationError("选区必须包含四个坐标。")
             normalized_box = tuple(_require_integer(value, "ROI") for value in self.box)
             object.__setattr__(self, "box", normalized_box)
+        if not _is_public_sequence(self.points):
+            raise SegmentationError("提示点必须是序列。")
         normalized_points = tuple(self.points)
         if not all(isinstance(point, PromptPoint) for point in normalized_points):
-            raise SegmentationError("提示点必须是 PromptPoint。")
+            raise SegmentationError("提示点必须全部为有效提示点。")
         object.__setattr__(self, "points", normalized_points)
 
     def record(self) -> dict[str, object]:
@@ -211,6 +216,8 @@ class OpenCvSegmenter:
         if np.count_nonzero(filtered) != np.count_nonzero(mask):
             warnings.append("removed_small_components")
         prompted = _apply_prompt_points(filtered, resolved_hints.points, roi)
+        if roi is not None:
+            prompted = _limit_to_roi(prompted, roi)
         if not np.any(prompted):
             warnings.append("no_foreground_detected")
 
@@ -405,6 +412,10 @@ def _require_integer(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise SegmentationError(f"{label}必须是整数。")
     return value
+
+
+def _is_public_sequence(value: object) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
 
 
 def _clip_point(point: tuple[int, int], *, width: int, height: int) -> tuple[int, int]:

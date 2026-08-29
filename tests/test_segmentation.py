@@ -112,6 +112,24 @@ def test_box_limits_foreground_to_the_selected_region() -> None:
     assert result.mask[32, 32] == 255
 
 
+@pytest.mark.parametrize("point", [PromptPoint(8, 8, True), PromptPoint(23, 23, True)])
+def test_keep_prompt_at_roi_boundary_cannot_escape_roi(point: PromptPoint) -> None:
+    image = np.full((32, 32, 3), (238, 232, 215), dtype=np.uint8)
+    image[12:20, 12:20] = (185, 30, 45)
+
+    result = OpenCvSegmenter(minimum_component_area=1).segment(
+        image,
+        ProfileId.FLAT_COLOR,
+        SegmentHints(box=(8, 8, 24, 24), points=[point]),
+    )
+
+    assert result.mask[point.y, point.x] == 255
+    assert not result.mask[:8].any()
+    assert not result.mask[24:].any()
+    assert not result.mask[:, :8].any()
+    assert not result.mask[:, 24:].any()
+
+
 def test_non_artifact_profile_allows_a_single_pixel_clipped_region() -> None:
     image = np.full((32, 32, 3), (238, 232, 215), dtype=np.uint8)
     image[8:24, 8:24] = (185, 30, 45)
@@ -124,6 +142,21 @@ def test_non_artifact_profile_allows_a_single_pixel_clipped_region() -> None:
 
     assert result.mask[16, 16] == 255
     assert result.mask.sum() == 255
+
+
+@pytest.mark.parametrize(
+    "box",
+    [42, "abcd", (1, 2, 3), (1, 2, 3, 4, 5), (1, 2, 3, 4.5)],
+)
+def test_segment_hints_rejects_malformed_box_with_typed_error(box: object) -> None:
+    with pytest.raises(SegmentationError):
+        SegmentHints(box=box)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("points", [None, 42, "point", [object()]])
+def test_segment_hints_rejects_malformed_points_with_typed_error(points: object) -> None:
+    with pytest.raises(SegmentationError):
+        SegmentHints(points=points)  # type: ignore[arg-type]
 
 
 def test_extract_rgba_preserves_source_rgb_and_uses_binary_mask_as_alpha() -> None:
