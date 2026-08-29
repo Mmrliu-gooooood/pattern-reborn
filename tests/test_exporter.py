@@ -343,6 +343,33 @@ def test_export_redacts_authorization_bearer_token(project, tmp_path) -> None:
         assert "secret-value" not in text
 
 
+def test_export_redacts_project_name_and_source_filename_secrets(project, tmp_path) -> None:
+    project.name = "Demo Authorization: Bearer leaked-name-token"
+    project.source.original_filename = "lotus api_key=leaked-file-token.jpg"
+    project.generations[0].id = "gen Authorization: Bearer leaked-id-token"
+    project.generations[0].provider = "seedream api_key=leaked-provider-token"
+    project.generations[0].model = "seedream-4.5 Bearer leaked-model-token"
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+    leaked = (
+        "leaked-name-token",
+        "leaked-file-token",
+        "leaked-id-token",
+        "leaked-provider-token",
+        "leaked-model-token",
+    )
+    blob = _package_text(package)
+    for token in leaked:
+        assert token not in blob
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    dumped = json.dumps(manifest)
+    for token in leaked:
+        assert token not in dumped
+    report = (package / "provenance.md").read_text(encoding="utf-8")
+    assert project.source.sha256 in report
+
+
 def test_provenance_discloses_ai_mockup_without_generations(project, tmp_path) -> None:
     project.generations = []
     project_dir = _project_dir(tmp_path, project)

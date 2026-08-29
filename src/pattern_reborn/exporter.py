@@ -295,9 +295,9 @@ def _write_attribution(project: ProjectRecord, package: Path) -> None:
         "",
         "## 源材料",
         "",
-        f"- 原始文件名：{project.source.original_filename}",
-        f"- SHA-256：{project.source.sha256}",
-        f"- 来源分类：{_PROVENANCE_ZH[project.provenance]}（{project.provenance.value}）",
+        f"- 原始文件名：{_redact_secrets(project.source.original_filename)}",
+        f"- SHA-256：{_redact_secrets(project.source.sha256)}",
+        f"- 来源分类：{_redact_secrets(_PROVENANCE_ZH[project.provenance])}（{_redact_secrets(project.provenance.value)}）",
         "",
     ]
     _write_utf8(package / "attribution.md", "\n".join(lines))
@@ -307,11 +307,11 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
     lines = [
         "# 出处报告",
         "",
-        f"- 项目：{project.name}",
-        f"- 项目标识：{project.id}",
-        f"- 源文件 SHA-256：{project.source.sha256}",
-        f"- 原始文件名：{project.source.original_filename}",
-        f"- 来源分类：{_PROVENANCE_ZH[project.provenance]}（{project.provenance.value}）",
+        f"- 项目：{_redact_secrets(project.name)}",
+        f"- 项目标识：{_redact_secrets(project.id)}",
+        f"- 源文件 SHA-256：{_redact_secrets(project.source.sha256)}",
+        f"- 原始文件名：{_redact_secrets(project.source.original_filename)}",
+        f"- 来源分类：{_redact_secrets(_PROVENANCE_ZH[project.provenance])}（{_redact_secrets(project.provenance.value)}）",
         "",
     ]
     has_ai = bool(project.generations) or any(item.ai_assisted for item in copied)
@@ -327,11 +327,11 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
         for item in project.generations:
             lines.extend(
                 [
-                    f"- 标识：{item.id}",
-                    f"- 提供方：{item.provider}",
-                    f"- 模型：{item.model}",
+                    f"- 标识：{_redact_secrets(item.id)}",
+                    f"- 提供方：{_redact_secrets(item.provider)}",
+                    f"- 模型：{_redact_secrets(item.model)}",
                     f"- 提示词：{_redact_secrets(item.prompt)}",
-                    f"- 时间：{_iso(item.created_at)}",
+                    f"- 时间：{_redact_secrets(_iso(item.created_at))}",
                     "",
                 ]
             )
@@ -351,11 +351,11 @@ def _mockup_ai_assisted(image_path: Path) -> bool:
 
 def _generation_entry(item: GenerationRecord) -> dict[str, object]:
     return {
-        "id": item.id,
-        "provider": item.provider,
-        "model": item.model,
-        "prompt": item.prompt,
-        "created_at": _iso(item.created_at),
+        "id": _redact_secrets(item.id),
+        "provider": _redact_secrets(item.provider),
+        "model": _redact_secrets(item.model),
+        "prompt": _redact_secrets(item.prompt),
+        "created_at": _redact_secrets(_iso(item.created_at)),
         "ai_assisted": True,
     }
 
