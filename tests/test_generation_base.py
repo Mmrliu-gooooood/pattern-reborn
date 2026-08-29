@@ -105,6 +105,19 @@ def test_generation_failure_redacts_arbitrary_provider_error_text() -> None:
     assert failure.provider_code == "[REDACTED]"
 
 
+def test_generation_failure_redacts_unrecognized_alphanumeric_token() -> None:
+    failure = GenerationFailure(
+        FailureKind.AUTH,
+        "身份验证失败，请检查访问凭证。",
+        provider_code="abc123",
+    )
+    rendered = f"{failure}{failure.provider_code}{failure!r}"
+    assert failure.provider_code == "[REDACTED]"
+    assert "abc123" not in rendered
+    assert failure.user_message_zh == "身份验证失败，请检查访问凭证。"
+    assert "abc123" not in failure.user_message_zh
+
+
 def test_generation_failure_keeps_short_safe_provider_code() -> None:
     failure = GenerationFailure(
         FailureKind.QUOTA,
@@ -113,3 +126,14 @@ def test_generation_failure_keeps_short_safe_provider_code() -> None:
     )
     assert failure.provider_code == "429"
     assert "429" in str(failure)
+
+
+def test_generation_failure_keeps_dotted_provider_error_code() -> None:
+    failure = GenerationFailure(
+        FailureKind.MALFORMED,
+        "生成请求参数无效，请调整后重试。",
+        provider_code="InvalidParameter",
+    )
+    assert failure.provider_code == "InvalidParameter"
+    assert "InvalidParameter" in str(failure)
+    assert failure.user_message_zh == "生成请求参数无效，请调整后重试。"
