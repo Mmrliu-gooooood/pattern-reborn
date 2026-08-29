@@ -55,7 +55,7 @@ class ArtifactKind(str, Enum):
 
 
 class SourceRecord(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     original_filename: str
     relative_path: str
@@ -64,7 +64,7 @@ class SourceRecord(BaseModel):
 
 
 class ArtifactIndex(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     upload: list[str] = Field(default_factory=list)
     extraction: list[str] = Field(default_factory=list)
@@ -75,7 +75,7 @@ class ArtifactIndex(BaseModel):
 
 
 class GenerationRecord(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     id: str
     provider: str
@@ -93,7 +93,7 @@ class GenerationRecord(BaseModel):
 
 
 class ProjectRecord(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     schema_version: Literal[1] = 1
     id: str

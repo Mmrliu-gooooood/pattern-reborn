@@ -4,6 +4,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 import re
+import stat
 from typing import Iterable
 from uuid import uuid4
 
@@ -52,8 +53,12 @@ class ProjectRepository:
     )
 
     def __init__(self, workspace: Path) -> None:
-        self.workspace = workspace.resolve()
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        try:
+            resolved_workspace = workspace.resolve()
+            resolved_workspace.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ProjectRepositoryError("项目工作区无法创建或访问。") from error
+        self.workspace = resolved_workspace
 
     def project_dir(self, project_id: str) -> Path:
         if not self._PROJECT_ID_PATTERN.fullmatch(project_id):
@@ -69,7 +74,10 @@ class ProjectRepository:
     ) -> ProjectRecord:
         project_id = self._new_project_id()
         project_dir = self.project_dir(project_id)
-        project_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            project_dir.mkdir(parents=True, exist_ok=False)
+        except OSError as error:
+            raise ProjectRepositoryError("项目目录无法创建。") from error
         source_record = self._copy_source(project_dir, source)
         now = datetime.now(UTC)
         project = ProjectRecord(
@@ -87,7 +95,7 @@ class ProjectRepository:
     def load(self, project_id: str) -> ProjectRecord:
         project_dir = self.project_dir(project_id)
         project_file = self._contained_path(project_dir / "project.json")
-        if not project_file.is_file():
+        if not self._path_exists(project_file, "项目文件无法访问。"):
             raise ProjectNotFoundError("项目文件不存在，无法读取项目。")
         project = self._read_project(project_file)
         if project.id != project_id:
@@ -97,11 +105,11 @@ class ProjectRepository:
 
     def save(self, project: ProjectRecord) -> None:
         project_dir = self.project_dir(project.id)
-        if not project_dir.is_dir():
+        if not self._is_directory(project_dir, "项目目录无法访问。"):
             raise ProjectNotFoundError("项目目录不存在，无法保存项目。")
         self._validate_project_paths(project, project_dir)
         project_file = self._contained_path(project_dir / "project.json")
-        if project_file.exists():
+        if self._path_exists(project_file, "项目文件无法访问。"):
             current = self._read_project(project_file)
             if current.id != project.id:
                 raise ProjectCorruptError("项目文件中的标识与目录不一致。")
@@ -121,16 +129,21 @@ class ProjectRepository:
                 os.fsync(handle.fileno())
             os.replace(temporary_file, project_file)
         except OSError as error:
-            if temporary_file.exists():
-                temporary_file.unlink()
+            self._discard_temporary_file(temporary_file)
             raise ProjectRepositoryError("项目保存失败，原项目文件未被替换。") from error
 
     def list_recent(self, limit: int = 3) -> list[ProjectRecord]:
         if limit < 0:
             raise ProjectRepositoryError("最近项目数量不能为负数。")
         projects: list[ProjectRecord] = []
-        for path in self.workspace.iterdir():
-            if not path.is_dir() or not self._PROJECT_ID_PATTERN.fullmatch(path.name):
+        try:
+            paths = tuple(self.workspace.iterdir())
+        except OSError as error:
+            raise ProjectRepositoryError("项目工作区无法读取。") from error
+        for path in paths:
+            if not self._is_directory(path, "项目工作区内容无法读取。"):
+                continue
+            if not self._PROJECT_ID_PATTERN.fullmatch(path.name):
                 continue
             projects.append(self.load(path.name))
         projects.sort(key=lambda project: project.updated_at, reverse=True)
@@ -170,19 +183,23 @@ class ProjectRepository:
     def _new_project_id(self) -> str:
         while True:
             project_id = f"project-{uuid4().hex}"
-            if not self.project_dir(project_id).exists():
+            if not self._path_exists(self.project_dir(project_id), "项目目录无法访问。"):
                 return project_id
 
     def _copy_source(self, project_dir: Path, source: Path) -> SourceRecord:
         try:
             source_path = source.resolve(strict=True)
+            source_mode = source_path.stat().st_mode
         except OSError as error:
             raise ProjectRepositoryError("源文件不存在或无法读取。") from error
-        if not source_path.is_file():
+        if not stat.S_ISREG(source_mode):
             raise ProjectRepositoryError("源文件不是可复制的普通文件。")
 
         source_dir = self._contained_path(project_dir / "source")
-        source_dir.mkdir(exist_ok=True)
+        try:
+            source_dir.mkdir(exist_ok=True)
+        except OSError as error:
+            raise ProjectRepositoryError("项目源文件目录无法创建。") from error
         temporary_file = self._contained_path(source_dir / ".source.tmp")
         digest = hashlib.sha256()
         byte_size = 0
@@ -197,8 +214,7 @@ class ProjectRepository:
             )
             os.replace(temporary_file, destination)
         except OSError as error:
-            if temporary_file.exists():
-                temporary_file.unlink()
+            self._discard_temporary_file(temporary_file)
             raise ProjectRepositoryError("源文件复制失败，原文件未被修改。") from error
         return SourceRecord(
             original_filename=source_path.name,
@@ -237,17 +253,48 @@ class ProjectRepository:
             yield from getattr(index, step.value)
 
     def _validate_relative_path(self, project_dir: Path, relative_path: str) -> Path:
-        candidate = Path(relative_path)
-        if not relative_path or candidate.is_absolute():
-            raise ProjectPathError("项目中的文件路径不合法。")
-        return self._contained_path(project_dir / candidate, project_dir)
+        try:
+            candidate = Path(relative_path)
+            if not relative_path or candidate.is_absolute():
+                raise ProjectPathError("项目中的文件路径不合法。")
+            return self._contained_path(project_dir / candidate, project_dir)
+        except ProjectRepositoryError:
+            raise
+        except (OSError, ValueError) as error:
+            raise ProjectPathError("项目中的文件路径不合法。") from error
 
     def _contained_path(self, path: Path, root: Path | None = None) -> Path:
-        container = (root or self.workspace).resolve()
         try:
+            container = (root or self.workspace).resolve()
             resolved = path.resolve()
         except OSError as error:
             raise ProjectPathError("项目路径无法解析。") from error
         if not resolved.is_relative_to(container):
             raise ProjectPathError("项目路径超出允许的工作区。")
         return resolved
+
+    @staticmethod
+    def _discard_temporary_file(temporary_file: Path) -> None:
+        try:
+            temporary_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _is_directory(path: Path, error_message: str) -> bool:
+        try:
+            return stat.S_ISDIR(path.stat().st_mode)
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise ProjectRepositoryError(error_message) from error
+
+    @staticmethod
+    def _path_exists(path: Path, error_message: str) -> bool:
+        try:
+            path.stat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise ProjectRepositoryError(error_message) from error

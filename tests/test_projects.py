@@ -1,14 +1,17 @@
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 import re
 
 import pytest
 
 from pattern_reborn.domain import CategoryId, ProvenanceClass, StepId
+import pattern_reborn.projects as projects_module
 from pattern_reborn.projects import (
     ProjectCorruptError,
     ProjectPathError,
     ProjectRepository,
+    ProjectRepositoryError,
     UnsupportedProjectSchemaError,
 )
 
@@ -121,6 +124,67 @@ def test_load_reports_corrupt_json_without_overwriting_file(tmp_path: Path) -> N
         repository.load(project.id)
 
     assert project_file.read_text(encoding="utf-8") == corrupt
+
+
+def test_load_rejects_unknown_top_level_field_without_overwriting_file(tmp_path: Path) -> None:
+    repository, project = make_project(tmp_path)
+    project_file = repository.project_dir(project.id) / "project.json"
+    payload = json.loads(project_file.read_text(encoding="utf-8"))
+    payload["future_field"] = {"version": 2}
+    original_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    project_file.write_bytes(original_bytes)
+
+    with pytest.raises(ProjectCorruptError, match="项目"):
+        repository.load(project.id)
+
+    assert project_file.read_bytes() == original_bytes
+
+
+def test_load_rejects_unknown_nested_field_without_overwriting_file(tmp_path: Path) -> None:
+    repository, project = make_project(tmp_path)
+    project_file = repository.project_dir(project.id) / "project.json"
+    payload = json.loads(project_file.read_text(encoding="utf-8"))
+    payload["source"]["future_checksum"] = "unrecognized"
+    original_bytes = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    project_file.write_bytes(original_bytes)
+
+    with pytest.raises(ProjectCorruptError, match="项目"):
+        repository.load(project.id)
+
+    assert project_file.read_bytes() == original_bytes
+
+
+def test_repository_rejects_workspace_path_that_is_a_file(tmp_path: Path) -> None:
+    workspace_file = tmp_path / "workspace-file"
+    workspace_file.write_bytes(b"not a directory")
+
+    with pytest.raises(ProjectRepositoryError) as captured:
+        ProjectRepository(workspace_file)
+
+    assert "工作区" in str(captured.value)
+    assert str(workspace_file) not in str(captured.value)
+
+
+def test_save_hides_replace_permission_error_and_preserves_original_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, project = make_project(tmp_path)
+    project_file = repository.project_dir(project.id) / "project.json"
+    original_bytes = project_file.read_bytes()
+    temporary_file = repository.project_dir(project.id) / "project.json.tmp"
+
+    def reject_replace(source: object, destination: object) -> None:
+        raise PermissionError(f"access denied: {source}")
+
+    monkeypatch.setattr(projects_module.os, "replace", reject_replace)
+
+    with pytest.raises(ProjectRepositoryError) as captured:
+        repository.save(project)
+
+    assert project_file.read_bytes() == original_bytes
+    assert not temporary_file.exists()
+    assert str(temporary_file) not in str(captured.value)
+    assert "access denied" not in str(captured.value).lower()
 
 
 def test_save_is_atomic_and_leaves_no_temporary_file(tmp_path: Path) -> None:
