@@ -386,8 +386,11 @@ def _sanitize_filename(name: str, fallback: str = "export") -> str:
 
 def _unique_name(source_ref: str, fallback: str, used: set[str]) -> str:
     original = Path(source_ref).name
-    stem = _sanitize_filename(Path(original).stem, fallback)
+    stem = Path(original).stem
     suffix = Path(original).suffix.lower()
+    complete = _redact_secrets(f"{stem}{suffix}" if suffix else stem)
+    stem = _sanitize_filename(Path(complete).stem, fallback)
+    suffix = Path(complete).suffix.lower()
     if suffix and _UNSAFE_FILENAME.search(suffix):
         suffix = ""
     candidate = f"{stem}{suffix}" if suffix else stem

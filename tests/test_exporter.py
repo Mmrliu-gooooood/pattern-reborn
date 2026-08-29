@@ -429,6 +429,28 @@ def test_case_insensitive_pattern_names_stay_unique(project, tmp_path) -> None:
     assert len({path.lower() for path in paths}) == 2
 
 
+def test_export_redacts_secret_in_filename_suffix(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    token = "leaked-suffix-token"
+    source_name = f"tile.Bearer {token}"
+    relative = f"patterns/{source_name}"
+    (project_dir / "patterns" / source_name).write_bytes(b"pattern-bytes")
+    project.artifacts.recomposition = [relative]
+    package = Exporter(project_dir).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+
+    for path in package.rglob("*"):
+        assert token not in path.name
+        assert token not in path.relative_to(package).as_posix()
+    assert token not in _package_text(package)
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    dumped = json.dumps(manifest)
+    assert token not in dumped
+    for entry in manifest["files"]:
+        assert (package / entry["path"]).is_file()
+
+
 def test_source_bytes_stay_identical_after_export(project, tmp_path) -> None:
     project_dir = _project_dir(tmp_path, project)
     original = (project_dir / project.source.relative_path).read_bytes()
