@@ -49,7 +49,8 @@ def load_working_image(path: Path, max_edge: int = 2048) -> Image.Image:
         max(1, round(image.width * scale)),
         max(1, round(image.height * scale)),
     )
-    return image.resize(size, Image.Resampling.LANCZOS).copy()
+    resize_source = _normalize_paletted_image_for_downscale(image)
+    return resize_source.resize(size, Image.Resampling.LANCZOS).copy()
 
 
 def save_png_atomic(image: Image.Image, destination: Path) -> None:
@@ -96,6 +97,14 @@ def _decode_image(path: Path) -> tuple[Image.Image, str]:
         ValueError,
     ) as error:
         raise ImageValidationError("图像无法安全解码或文件已损坏。") from error
+
+
+def _normalize_paletted_image_for_downscale(image: Image.Image) -> Image.Image:
+    if image.mode != "P":
+        return image
+    if "transparency" in image.info:
+        return image.convert("RGBA")
+    return image.convert("RGB")
 
 
 def _discard_temporary_file(path: Path) -> None:

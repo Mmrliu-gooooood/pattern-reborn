@@ -18,3 +18,22 @@ def write_image(path: Path, *, image_format: str, mode: str = "RGB", size: tuple
                 pixels[x, y] = (red, green, blue)
     image.save(path, format=image_format)
     return path
+
+
+def write_paletted_png(path: Path, *, transparent: bool) -> Path:
+    """Write a tiny hard-edged P-mode PNG whose Lanczos result differs from nearest-neighbor."""
+    image = Image.new("P", (16, 8))
+    image.putpalette(
+        [0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255] + [0] * (256 * 3 - 12)
+    )
+    image.putdata(
+        [
+            0 if x < 6 else 1 if x < 10 else 2 if (x + y) % 2 else 3
+            for y in range(image.height)
+            for x in range(image.width)
+        ]
+    )
+    if transparent:
+        image.info["transparency"] = 0
+    image.save(path, format="PNG")
+    return path

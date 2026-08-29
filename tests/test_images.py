@@ -5,7 +5,7 @@ import pytest
 
 import pattern_reborn.images as images_module
 from pattern_reborn.images import ImageValidationError, load_working_image, probe_image, save_png_atomic
-from tests.fixtures.images import write_image
+from tests.fixtures.images import write_image, write_paletted_png
 
 
 @pytest.fixture
@@ -79,6 +79,46 @@ def test_working_copy_never_enlarges_and_preserves_alpha(tmp_path: Path) -> None
     assert image.size == (4, 3)
     assert image.mode == "RGBA"
     assert image.getpixel((1, 1))[3] == 34
+
+
+def test_downscaled_opaque_paletted_png_uses_rgb_lanczos_and_preserves_source(tmp_path: Path) -> None:
+    path = write_paletted_png(tmp_path / "opaque-palette.png", transparent=False)
+    before = path.read_bytes()
+    with Image.open(path) as source:
+        nearest = source.convert("RGB").resize((4, 2), Image.Resampling.NEAREST)
+
+    image = load_working_image(path, max_edge=4)
+
+    assert image.mode == "RGB"
+    assert image.size == (4, 2)
+    assert image.tobytes() != nearest.tobytes()
+    assert path.read_bytes() == before
+
+
+def test_downscaled_transparent_paletted_png_uses_rgba_lanczos_and_preserves_alpha(
+    tmp_path: Path,
+) -> None:
+    path = write_paletted_png(tmp_path / "transparent-palette.png", transparent=True)
+    before = path.read_bytes()
+    with Image.open(path) as source:
+        nearest = source.convert("RGBA").resize((4, 2), Image.Resampling.NEAREST)
+
+    image = load_working_image(path, max_edge=4)
+
+    assert image.mode == "RGBA"
+    assert image.size == (4, 2)
+    assert image.getchannel("A").getextrema() == (0, 255)
+    assert image.tobytes() != nearest.tobytes()
+    assert path.read_bytes() == before
+
+
+def test_unresized_paletted_png_keeps_its_decoded_mode(tmp_path: Path) -> None:
+    path = write_paletted_png(tmp_path / "original-palette.png", transparent=True)
+
+    image = load_working_image(path, max_edge=32)
+
+    assert image.mode == "P"
+    assert image.size == (16, 8)
 
 
 def test_working_copy_applies_exif_orientation(tmp_path: Path) -> None:
