@@ -7,6 +7,33 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $ProjectRoot
 
+$Runtime = @{
+    PIP_CACHE_DIR = Join-Path $ProjectRoot ".cache\pip"
+    HF_HOME = Join-Path $ProjectRoot ".cache\huggingface"
+    TORCH_HOME = Join-Path $ProjectRoot ".cache\torch"
+    XDG_CACHE_HOME = Join-Path $ProjectRoot ".cache\xdg"
+    TEMP = Join-Path $ProjectRoot ".cache\tmp"
+    TMP = Join-Path $ProjectRoot ".cache\tmp"
+}
+$MutableDirectories = @(
+    $Runtime.PIP_CACHE_DIR,
+    $Runtime.HF_HOME,
+    $Runtime.TORCH_HOME,
+    $Runtime.XDG_CACHE_HOME,
+    $Runtime.TEMP,
+    $Runtime.TMP,
+    (Join-Path $ProjectRoot "models"),
+    (Join-Path $ProjectRoot "workspace"),
+    (Join-Path $ProjectRoot "outputs")
+)
+
+foreach ($Directory in $MutableDirectories) {
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+}
+foreach ($Variable in $Runtime.Keys) {
+    Set-Item -Path "Env:$Variable" -Value $Runtime[$Variable]
+}
+
 function Test-Python311 {
     param(
         [Parameter(Mandatory = $true)]
@@ -53,33 +80,6 @@ else {
     }
 }
 
-$Runtime = @{
-    PIP_CACHE_DIR = Join-Path $ProjectRoot ".cache\pip"
-    HF_HOME = Join-Path $ProjectRoot ".cache\huggingface"
-    TORCH_HOME = Join-Path $ProjectRoot ".cache\torch"
-    XDG_CACHE_HOME = Join-Path $ProjectRoot ".cache\xdg"
-    TEMP = Join-Path $ProjectRoot ".cache\tmp"
-    TMP = Join-Path $ProjectRoot ".cache\tmp"
-}
-$MutableDirectories = @(
-    $Runtime.PIP_CACHE_DIR,
-    $Runtime.HF_HOME,
-    $Runtime.TORCH_HOME,
-    $Runtime.XDG_CACHE_HOME,
-    $Runtime.TEMP,
-    $Runtime.TMP,
-    (Join-Path $ProjectRoot "models"),
-    (Join-Path $ProjectRoot "workspace"),
-    (Join-Path $ProjectRoot "outputs")
-)
-
-foreach ($Directory in $MutableDirectories) {
-    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
-}
-foreach ($Variable in $Runtime.Keys) {
-    Set-Item -Path "Env:$Variable" -Value $Runtime[$Variable]
-}
-
 $VenvPath = Join-Path $ProjectRoot ".venv"
 $VenvPython = Join-Path $VenvPath "Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
@@ -87,6 +87,9 @@ if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     if ($LASTEXITCODE -ne 0) {
         throw "Virtual environment creation failed with exit code $LASTEXITCODE"
     }
+}
+if (-not (Test-Python311 -Executable $VenvPython)) {
+    throw "The existing virtual environment is not Python 3.11. Remove .venv and recreate it with Python 3.11, or provide a different project-local venv."
 }
 
 & $VenvPython -m pip install --upgrade pip
