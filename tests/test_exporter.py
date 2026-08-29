@@ -309,6 +309,39 @@ def test_export_redacts_secret_shaped_prompt_text(project, tmp_path) -> None:
     assert "AI 辅助" in report
 
 
+def test_export_redacts_prompt_secrets_before_json_dumps(project, tmp_path) -> None:
+    project.generations[0].prompt = "keep-me authorization=abc"
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+    raw = (package / "manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(raw)
+    prompt = manifest["generations"][0]["prompt"]
+    assert "authorization" not in prompt.lower()
+    assert "abc" not in prompt
+    assert "keep-me" in prompt
+    assert manifest["schema_version"] == 1
+    assert manifest["generations"][0]["id"] == project.generations[0].id
+    assert "authorization" not in raw.lower()
+    assert "abc" not in raw
+
+
+def test_provenance_discloses_ai_mockup_without_generations(project, tmp_path) -> None:
+    project.generations = []
+    project_dir = _project_dir(tmp_path, project)
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=True)
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(mockups=True, report=True),
+        tmp_path / "exports",
+    )
+    report = (package / "provenance.md").read_text(encoding="utf-8")
+    assert "AI 辅助" in report
+    assert project.source.sha256 in report
+
+
 def test_sanitized_pattern_basename_collisions_stay_unique(project, tmp_path) -> None:
     project_dir = _project_dir(tmp_path, project)
     patterns_dir = project_dir / "patterns"

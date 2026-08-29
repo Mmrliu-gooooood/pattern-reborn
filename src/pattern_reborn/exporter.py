@@ -99,7 +99,7 @@ class Exporter:
             _write_manifest(project, copied, temporary)
             _write_attribution(project, temporary)
             if selection.report:
-                _write_provenance(project, temporary)
+                _write_provenance(project, copied, temporary)
             os.replace(temporary, final_dir)
         except ExportError:
             _discard_tree(temporary)
@@ -279,7 +279,10 @@ def _write_manifest(project: ProjectRecord, copied: list[_CopiedFile], package: 
         ],
         "generations": [_generation_entry(item) for item in project.generations],
     }
-    _write_utf8(package / "manifest.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    _write_utf8(
+        package / "manifest.json",
+        json.dumps(_redact_payload(payload), ensure_ascii=False, indent=2) + "\n",
+    )
 
 
 def _write_attribution(project: ProjectRecord, package: Path) -> None:
@@ -300,7 +303,7 @@ def _write_attribution(project: ProjectRecord, package: Path) -> None:
     _write_utf8(package / "attribution.md", "\n".join(lines))
 
 
-def _write_provenance(project: ProjectRecord, package: Path) -> None:
+def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package: Path) -> None:
     lines = [
         "# 出处报告",
         "",
@@ -311,7 +314,8 @@ def _write_provenance(project: ProjectRecord, package: Path) -> None:
         f"- 来源分类：{_PROVENANCE_ZH[project.provenance]}（{project.provenance.value}）",
         "",
     ]
-    if project.generations:
+    has_ai = bool(project.generations) or any(item.ai_assisted for item in copied)
+    if has_ai:
         lines.extend(
             [
                 "## AI 辅助",
@@ -326,7 +330,7 @@ def _write_provenance(project: ProjectRecord, package: Path) -> None:
                     f"- 标识：{item.id}",
                     f"- 提供方：{item.provider}",
                     f"- 模型：{item.model}",
-                    f"- 提示词：{item.prompt}",
+                    f"- 提示词：{_redact_secrets(item.prompt)}",
                     f"- 时间：{_iso(item.created_at)}",
                     "",
                 ]
@@ -359,6 +363,16 @@ def _generation_entry(item: GenerationRecord) -> dict[str, object]:
 def _redact_secrets(text: str) -> str:
     redacted = _SECRET_MATERIAL.sub("[REDACTED]", text)
     return _SECRET_TOKENS.sub("[REDACTED]", redacted)
+
+
+def _redact_payload(value: object) -> object:
+    if isinstance(value, str):
+        return _redact_secrets(value)
+    if isinstance(value, list):
+        return [_redact_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_payload(item) for key, item in value.items()}
+    return value
 
 
 def _sanitize_filename(name: str, fallback: str = "export") -> str:
@@ -394,7 +408,7 @@ def _iso(value: datetime) -> str:
 
 
 def _write_utf8(path: Path, text: str) -> None:
-    path.write_text(_redact_secrets(text), encoding="utf-8", newline="\n")
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def _contained_path(path: Path, root: Path) -> Path:
