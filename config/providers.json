@@ -1,0 +1,25 @@
+{
+  "default_provider": "seedream",
+  "providers": [
+    {
+      "id": "seedream",
+      "display_name_zh": "即梦 Seedream",
+      "base_url": "https://ark.cn-beijing.volces.com",
+      "default_model": "doubao-seedream-4-0-250828",
+      "api_key_env": "SEEDREAM_API_KEY",
+      "base_url_env": "SEEDREAM_BASE_URL",
+      "model_env": "SEEDREAM_MODEL",
+      "size_options": ["2K", "4K", "1024x1024", "2048x2048"]
+    },
+    {
+      "id": "qwen",
+      "display_name_zh": "通义千问图像",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "default_model": "qwen-image-3.0-pro",
+      "api_key_env": "QWEN_API_KEY",
+      "base_url_env": "QWEN_BASE_URL",
+      "model_env": "QWEN_MODEL",
+      "size_options": ["1024x1024", "1328x1328", "1664x928", "928x1664"]
+    }
+  ]
+}
