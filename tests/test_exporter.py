@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import re
 
 import pytest
 
 from pattern_reborn.domain import CategoryId, GenerationRecord, ProvenanceClass
-from pattern_reborn.exporter import Exporter, ExportSelection
+from pattern_reborn.exporter import ExportError, Exporter, ExportSelection
 from pattern_reborn.projects import ProjectRepository
 from tests.fixtures.images import write_image
 from tests.test_projects import make_project
@@ -22,10 +23,9 @@ def project(tmp_path: Path):
     project_dir = repository.project_dir(record.id)
     (project_dir / "patterns").mkdir()
     (project_dir / "generated").mkdir()
-    pattern = write_image(project_dir / "patterns" / "repeat.png", image_format="PNG", size=(10, 8))
-    generated = write_image(project_dir / "generated" / "seedream.png", image_format="PNG", size=(10, 8))
-    record.source.relative_path = str((project_dir / record.source.relative_path).resolve())
-    record.artifacts.recomposition = [str(pattern.resolve())]
+    write_image(project_dir / "patterns" / "repeat.png", image_format="PNG", size=(10, 8))
+    write_image(project_dir / "generated" / "seedream.png", image_format="PNG", size=(10, 8))
+    record.artifacts.recomposition = ["patterns/repeat.png"]
     record.processing_parameters = {
         "api_key": "sk-secret-value",
         "authorization": "Bearer sk-secret-value",
@@ -37,15 +37,28 @@ def project(tmp_path: Path):
             provider="seedream",
             model="seedream-4.5",
             prompt="莲纹书签",
-            artifact_path=str(generated.resolve()),
+            artifact_path="generated/seedream.png",
             created_at=datetime(2026, 8, 29, 10, 15, tzinfo=UTC),
         )
     ]
     return record
 
 
-def _project_dir(project) -> Path:
-    return Path(project.source.relative_path).resolve().parent.parent
+def _project_dir(tmp_path: Path, project) -> Path:
+    return (tmp_path / "workspace" / project.id).resolve()
+
+
+def _exporter(tmp_path: Path, project) -> Exporter:
+    return Exporter(_project_dir(tmp_path, project))
+
+
+def _write_mockup_with_provenance(path: Path, *, ai_assisted: bool) -> Path:
+    written = write_image(path, image_format="PNG", size=(12, 8))
+    path.with_suffix(".json").write_text(
+        json.dumps({"ai_assisted": ai_assisted}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return written
 
 
 def _package_text(package: Path) -> str:
@@ -61,7 +74,10 @@ def _package_text(package: Path) -> str:
 
 
 def test_export_contains_manifest_report_and_selected_assets(project, tmp_path) -> None:
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    project_dir = _project_dir(tmp_path, project)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
     assert (package / "manifest.json").exists()
     report = (package / "provenance.md").read_text(encoding="utf-8")
     assert project.source.sha256 in report
@@ -69,20 +85,45 @@ def test_export_contains_manifest_report_and_selected_assets(project, tmp_path) 
     assert (package / "attribution.md").exists()
     copied = list((package / "patterns").glob("*.png"))
     assert copied
-    assert copied[0].read_bytes() == Path(project.artifacts.recomposition[0]).read_bytes()
+    assert copied[0].read_bytes() == (project_dir / project.artifacts.recomposition[0]).read_bytes()
 
 
 def test_export_paths_stay_under_destination_root(project, tmp_path) -> None:
     destination = tmp_path / "exports"
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), destination)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), destination
+    )
     root = destination.resolve()
     assert package.resolve().is_relative_to(root)
     for path in package.rglob("*"):
         assert path.resolve().is_relative_to(root)
 
 
+def test_export_rejects_path_outside_project_root(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    outside = write_image(tmp_path / "outside-secret.png", image_format="PNG", size=(8, 8))
+    secret_bytes = outside.read_bytes()
+    destination = tmp_path / "exports"
+    destination.mkdir()
+
+    project.artifacts.recomposition = [str(outside.resolve())]
+    with pytest.raises(ExportError):
+        Exporter(project_dir).export(project, ExportSelection(patterns=True), destination)
+
+    relative_escape = Path(os.path.relpath(outside, project_dir)).as_posix()
+    project.artifacts.recomposition = [relative_escape]
+    with pytest.raises(ExportError):
+        Exporter(project_dir).export(project, ExportSelection(patterns=True), destination)
+
+    leaked = [path for path in destination.rglob("*") if path.is_file()]
+    assert leaked == []
+    assert all(path.read_bytes() != secret_bytes for path in leaked)
+
+
 def test_export_omits_secret_shaped_fields(project, tmp_path) -> None:
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
     blob = _package_text(package)
     for marker in _SECRET_MARKERS:
         assert marker not in blob
@@ -93,7 +134,9 @@ def test_export_omits_secret_shaped_fields(project, tmp_path) -> None:
 
 
 def test_attribution_names_team_templates_and_source(project, tmp_path) -> None:
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
     attribution = (package / "attribution.md").read_text(encoding="utf-8")
     assert "Pattern Reborn team" in attribution
     assert "project-original" in attribution
@@ -112,15 +155,14 @@ def test_unsafe_names_are_sanitized_and_contained(tmp_path: Path) -> None:
     )
     project_dir = repository.project_dir(record.id)
     (project_dir / "patterns").mkdir()
-    unsafe_pattern = write_image(
+    write_image(
         project_dir / "patterns" / "ok.png",
         image_format="PNG",
         size=(8, 8),
     )
-    record.source.relative_path = str((project_dir / record.source.relative_path).resolve())
-    record.artifacts.recomposition = [str(unsafe_pattern.resolve())]
+    record.artifacts.recomposition = ["patterns/ok.png"]
     destination = tmp_path / "out"
-    package = Exporter().export(record, ExportSelection(patterns=True, report=True), destination)
+    package = Exporter(project_dir).export(record, ExportSelection(patterns=True, report=True), destination)
 
     assert package.parent.resolve() == destination.resolve()
     assert ".." not in package.name
@@ -132,7 +174,9 @@ def test_unsafe_names_are_sanitized_and_contained(tmp_path: Path) -> None:
 
 
 def test_manifest_schema_is_versioned_and_stable(project, tmp_path) -> None:
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
     manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == 1
     assert set(manifest) >= {
@@ -165,10 +209,11 @@ def test_manifest_schema_is_versioned_and_stable(project, tmp_path) -> None:
 
 
 def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) -> None:
-    project_dir = _project_dir(project)
+    project_dir = _project_dir(tmp_path, project)
+    project.generations = []
     mockups_dir = project_dir / "mockups"
     mockups_dir.mkdir()
-    mockup = write_image(mockups_dir / "bookmark.png", image_format="PNG", size=(12, 8))
+    mockup = _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=True)
     outside = write_image(project_dir / "outside.png", image_format="PNG", size=(8, 8))
     destination = tmp_path / "exports"
     package = Exporter(project_dir).export(
@@ -182,6 +227,7 @@ def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) ->
     assert copied[0].read_bytes() == mockup.read_bytes()
     assert copied[0].resolve().is_relative_to(destination.resolve())
     assert not any(path.read_bytes() == outside.read_bytes() for path in package.rglob("*.png"))
+    assert not any(path.suffix.lower() == ".json" for path in (package / "mockups").rglob("*"))
     for path in package.rglob("*"):
         assert path.resolve().is_relative_to(destination.resolve())
         assert ".." not in path.relative_to(destination).as_posix()
@@ -193,8 +239,48 @@ def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) ->
     assert ".." not in mockup_entries[0]["path"]
 
 
+def test_export_non_ai_mockup_not_assisted_when_generation_exists(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    assert project.generations
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    mockup = _write_mockup_with_provenance(mockups_dir / "tote_bag.png", ai_assisted=False)
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(mockups=True, report=True),
+        tmp_path / "exports",
+    )
+
+    copied = list((package / "mockups").rglob("*.png"))
+    assert len(copied) == 1
+    assert copied[0].read_bytes() == mockup.read_bytes()
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    mockup_entries = [item for item in manifest["files"] if item["kind"] == "mockup"]
+    assert len(mockup_entries) == 1
+    assert mockup_entries[0]["ai_assisted"] is False
+
+
+def test_export_generated_copies_remain_ai_assisted(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=False)
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(generations=True, mockups=True, report=True),
+        tmp_path / "exports",
+    )
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    generated = [item for item in manifest["files"] if item["kind"] == "generation"]
+    mockups = [item for item in manifest["files"] if item["kind"] == "mockup"]
+    assert generated
+    assert all(item["ai_assisted"] is True for item in generated)
+    assert mockups
+    assert all(item["ai_assisted"] is False for item in mockups)
+
+
 def test_export_omits_mockups_when_not_selected(project, tmp_path) -> None:
-    project_dir = _project_dir(project)
+    project_dir = _project_dir(tmp_path, project)
     mockups_dir = project_dir / "mockups"
     mockups_dir.mkdir()
     write_image(mockups_dir / "bookmark.png", image_format="PNG", size=(12, 8))
@@ -210,7 +296,9 @@ def test_export_omits_mockups_when_not_selected(project, tmp_path) -> None:
 
 def test_export_redacts_secret_shaped_prompt_text(project, tmp_path) -> None:
     project.generations[0].prompt = "莲纹 Bearer sk-secret-value api_key=sk-secret-value"
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
     blob = _package_text(package)
     for marker in ("Bearer", "sk-secret-value", "api_key"):
         assert marker not in blob
@@ -222,12 +310,12 @@ def test_export_redacts_secret_shaped_prompt_text(project, tmp_path) -> None:
 
 
 def test_sanitized_pattern_basename_collisions_stay_unique(project, tmp_path) -> None:
-    project_dir = _project_dir(project)
+    project_dir = _project_dir(tmp_path, project)
     patterns_dir = project_dir / "patterns"
     first = write_image(patterns_dir / "ok.png", image_format="PNG", size=(10, 8))
     second = write_image(patterns_dir / "ok..png", image_format="PNG", size=(12, 8))
-    project.artifacts.recomposition = [str(first.resolve()), str(second.resolve())]
-    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    project.artifacts.recomposition = ["patterns/ok.png", "patterns/ok..png"]
+    package = Exporter(project_dir).export(project, ExportSelection(patterns=True, report=True), tmp_path)
 
     copied = sorted((package / "patterns").glob("*.png"))
     assert len(copied) == 2
@@ -242,13 +330,14 @@ def test_sanitized_pattern_basename_collisions_stay_unique(project, tmp_path) ->
 
 
 def test_source_bytes_stay_identical_after_export(project, tmp_path) -> None:
-    original = Path(project.source.relative_path).read_bytes()
-    package = Exporter().export(
+    project_dir = _project_dir(tmp_path, project)
+    original = (project_dir / project.source.relative_path).read_bytes()
+    package = _exporter(tmp_path, project).export(
         project,
         ExportSelection(source=True, patterns=True, report=True),
         tmp_path,
     )
-    assert Path(project.source.relative_path).read_bytes() == original
+    assert (project_dir / project.source.relative_path).read_bytes() == original
     exported_sources = list((package / "source").glob("*"))
     assert exported_sources
     assert exported_sources[0].read_bytes() == original

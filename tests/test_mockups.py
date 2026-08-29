@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
+import json
 from pathlib import Path
 
 from PIL import Image
 import pytest
 
-from pattern_reborn.mockups import ArtworkRef, MockupOptions, compose_mockup, load_mockup_catalog
+from pattern_reborn.mockups import (
+    ArtworkRef,
+    MockupOptions,
+    compose_mockup,
+    load_mockup_catalog,
+    save_composed_mockup,
+)
 from tests.fixtures.images import write_image
 
 
@@ -68,3 +75,28 @@ def test_compose_keeps_template_pixels_outside_placement(mockup_catalog, tmp_pat
         assert result.image.getpixel((result.image.width - 1, 0)) == original_rgba.getpixel(
             (original_rgba.width - 1, 0)
         )
+
+
+def test_compose_persists_ai_assisted_provenance_sidecar(mockup_catalog, ai_pattern, tmp_path: Path) -> None:
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+
+    save_composed_mockup(result, destination)
+
+    sidecar = json.loads(destination.with_suffix(".json").read_text(encoding="utf-8"))
+    assert sidecar["ai_assisted"] is True
+
+
+def test_compose_persists_non_ai_provenance_sidecar(mockup_catalog, tmp_path: Path) -> None:
+    path = write_image(tmp_path / "motif.png", image_format="PNG", mode="RGBA", size=(16, 16))
+    result = compose_mockup(
+        mockup_catalog["tote_bag"],
+        ArtworkRef(path=path, ai_assisted=False),
+        MockupOptions(),
+    )
+    destination = tmp_path / "tote_bag.png"
+
+    save_composed_mockup(result, destination)
+
+    sidecar = json.loads(destination.with_suffix(".json").read_text(encoding="utf-8"))
+    assert sidecar["ai_assisted"] is False

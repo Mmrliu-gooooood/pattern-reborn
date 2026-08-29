@@ -23,6 +23,7 @@ class ExportError(ValueError):
 
 
 _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MOCKUP_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _SECRET_MATERIAL = re.compile(
     r"(?i)("
     r"api[_-]?key\s*[=:]\s*\S+"
@@ -72,8 +73,8 @@ class _CopiedFile:
 
 
 class Exporter:
-    def __init__(self, project_root: Path | None = None) -> None:
-        self._project_root = Path(project_root).resolve() if project_root is not None else None
+    def __init__(self, project_root: Path) -> None:
+        self._project_root = Path(project_root).resolve()
 
     def export(
         self,
@@ -180,15 +181,17 @@ class Exporter:
         return copied
 
     def _copy_mockup_assets(self, project: ProjectRecord, package: Path) -> list[_CopiedFile]:
-        if self._project_root is None:
-            return []
+        _ = project
         mockups_root = (self._project_root / "mockups").resolve()
         if not mockups_root.is_dir() or not mockups_root.is_relative_to(self._project_root):
             return []
         copied: list[_CopiedFile] = []
         used: set[str] = set()
-        ai_assisted = bool(project.generations)
-        candidates = sorted(path for path in mockups_root.rglob("*") if path.is_file())
+        candidates = sorted(
+            path
+            for path in mockups_root.rglob("*")
+            if path.is_file() and path.suffix.lower() in _MOCKUP_IMAGE_SUFFIXES
+        )
         for index, source in enumerate(candidates, start=1):
             try:
                 resolved = source.resolve()
@@ -205,7 +208,7 @@ class Exporter:
                     relative_source,
                     package / "mockups" / dest_name,
                     "mockup",
-                    ai_assisted=ai_assisted,
+                    ai_assisted=_mockup_ai_assisted(resolved),
                     package=package,
                 )
             )
@@ -240,15 +243,12 @@ class Exporter:
 
     def _resolve_input(self, relative_path: str) -> Path:
         candidate = Path(relative_path)
-        if candidate.is_absolute():
-            try:
-                resolved = candidate.resolve(strict=True)
-            except OSError as error:
-                raise ExportError("导出源文件不存在或无法读取。") from error
-            return resolved
-        if self._project_root is None:
-            raise ExportError("无法解析导出源路径。")
-        resolved = (self._project_root / candidate).resolve()
+        if not relative_path or candidate.is_absolute():
+            raise ExportError("导出源路径超出项目目录。")
+        try:
+            resolved = (self._project_root / candidate).resolve()
+        except OSError as error:
+            raise ExportError("导出源文件不存在或无法读取。") from error
         if not resolved.is_relative_to(self._project_root):
             raise ExportError("导出源路径超出项目目录。")
         if not resolved.is_file():
@@ -332,6 +332,17 @@ def _write_provenance(project: ProjectRecord, package: Path) -> None:
                 ]
             )
     _write_utf8(package / "provenance.md", "\n".join(lines))
+
+
+def _mockup_ai_assisted(image_path: Path) -> bool:
+    sidecar = image_path.with_suffix(".json")
+    try:
+        if not sidecar.is_file() or not sidecar.resolve().is_relative_to(image_path.parent.resolve()):
+            return False
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("ai_assisted") is True
 
 
 def _generation_entry(item: GenerationRecord) -> dict[str, object]:

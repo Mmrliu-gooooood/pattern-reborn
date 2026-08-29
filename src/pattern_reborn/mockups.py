@@ -122,6 +122,18 @@ def compose_mockup(
     return MockupResult(image=composed, ai_assisted=bool(artwork.ai_assisted))
 
 
+def save_composed_mockup(result: MockupResult, destination: Path) -> None:
+    dest = Path(destination)
+    save_png_atomic(result.image, dest)
+    sidecar = dest.with_suffix(".json")
+    payload = {"ai_assisted": bool(result.ai_assisted)}
+    sidecar.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
 def _template_from_metadata(root: Path, record: object) -> MockupTemplate:
     if not isinstance(record, dict):
         raise MockupError("贴图模板元数据格式无效。")
