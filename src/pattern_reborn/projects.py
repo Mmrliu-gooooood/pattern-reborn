@@ -170,6 +170,15 @@ class ProjectRepository:
                     if record.artifact_path not in project.stale_artifacts:
                         project.stale_artifacts.append(record.artifact_path)
                 project.generations = []
+            if later_step is StepId.EXPORT:
+                parameters = dict(project.processing_parameters)
+                current_mockups = parameters.get("current_mockups")
+                if isinstance(current_mockups, list):
+                    for mockup_id in current_mockups:
+                        if isinstance(mockup_id, str) and mockup_id not in project.stale_artifacts:
+                            project.stale_artifacts.append(mockup_id)
+                parameters["current_mockups"] = []
+                project.processing_parameters = parameters
 
         setattr(project.artifacts, step.value, list(artifact_paths))
         retained_steps = {

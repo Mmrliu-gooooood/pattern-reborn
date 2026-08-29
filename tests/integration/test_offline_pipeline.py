@@ -38,6 +38,10 @@ def test_offline_pipeline_reaches_export_without_generation(app_service, source_
     assert analysis.palette
     assert mockup.path.exists()
     assert mockup.path.is_relative_to(app_service.repository.project_dir(project.id) / "mockups")
+    exported_mockups = list((package / "mockups").glob("*.png"))
+    assert len(exported_mockups) == 1
+    assert exported_mockups[0].read_bytes() == mockup.path.read_bytes()
+    assert not any(path.suffix.lower() == ".json" for path in (package / "mockups").rglob("*"))
     assert source_fixture.read_bytes() == original
     copied_source = app_service.repository.project_dir(project.id) / project.source.relative_path
     assert copied_source.read_bytes() == original

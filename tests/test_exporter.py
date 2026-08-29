@@ -208,6 +208,29 @@ def test_manifest_schema_is_versioned_and_stable(project, tmp_path) -> None:
     assert "莲纹书签" in report
 
 
+def test_export_copies_only_listed_current_mockup_paths(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    project.generations = []
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    current = _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=False)
+    obsolete = write_image(mockups_dir / "obsolete.png", image_format="PNG", size=(16, 10))
+    project.processing_parameters["current_mockups"] = ["mockups/bookmark.png"]
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(mockups=True, report=True),
+        tmp_path / "exports",
+    )
+
+    copied = list((package / "mockups").rglob("*.png"))
+    assert len(copied) == 1
+    assert copied[0].read_bytes() == current.read_bytes()
+    assert copied[0].name == "bookmark.png"
+    assert not any(path.name == "obsolete.png" for path in package.rglob("*"))
+    assert not any(path.read_bytes() == obsolete.read_bytes() for path in package.rglob("*.png"))
+    assert not any(path.suffix.lower() == ".json" for path in (package / "mockups").rglob("*"))
+
+
 def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) -> None:
     project_dir = _project_dir(tmp_path, project)
     project.generations = []
@@ -215,6 +238,7 @@ def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) ->
     mockups_dir.mkdir()
     mockup = _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=True)
     outside = write_image(project_dir / "outside.png", image_format="PNG", size=(8, 8))
+    project.processing_parameters["current_mockups"] = ["mockups/bookmark.png"]
     destination = tmp_path / "exports"
     package = Exporter(project_dir).export(
         project,
@@ -245,6 +269,7 @@ def test_export_non_ai_mockup_not_assisted_when_generation_exists(project, tmp_p
     mockups_dir = project_dir / "mockups"
     mockups_dir.mkdir()
     mockup = _write_mockup_with_provenance(mockups_dir / "tote_bag.png", ai_assisted=False)
+    project.processing_parameters["current_mockups"] = ["mockups/tote_bag.png"]
     package = Exporter(project_dir).export(
         project,
         ExportSelection(mockups=True, report=True),
@@ -265,6 +290,7 @@ def test_export_generated_copies_remain_ai_assisted(project, tmp_path) -> None:
     mockups_dir = project_dir / "mockups"
     mockups_dir.mkdir()
     _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=False)
+    project.processing_parameters["current_mockups"] = ["mockups/bookmark.png"]
     package = Exporter(project_dir).export(
         project,
         ExportSelection(generations=True, mockups=True, report=True),
@@ -397,6 +423,7 @@ def test_provenance_discloses_ai_mockup_without_generations(project, tmp_path) -
     mockups_dir = project_dir / "mockups"
     mockups_dir.mkdir()
     _write_mockup_with_provenance(mockups_dir / "bookmark.png", ai_assisted=True)
+    project.processing_parameters["current_mockups"] = ["mockups/bookmark.png"]
     package = Exporter(project_dir).export(
         project,
         ExportSelection(mockups=True, report=True),

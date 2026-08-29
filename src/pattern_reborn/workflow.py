@@ -354,6 +354,15 @@ class PatternRebornService:
         parameters = dict(project.processing_parameters)
         parameters["current_step"] = StepId.EXPORT.value
         parameters["mockup"] = {"template_id": template_id, "artwork_id": artwork_id, "artifact_id": mockup_id}
+        raw_mockups = parameters.get("current_mockups")
+        current_mockups = (
+            [path for path in raw_mockups if isinstance(path, str)]
+            if isinstance(raw_mockups, list)
+            else []
+        )
+        if mockup_id not in current_mockups:
+            current_mockups.append(mockup_id)
+        parameters["current_mockups"] = current_mockups
         project.processing_parameters = parameters
         project.updated_at = datetime.now(UTC)
         self.repository.save(project)

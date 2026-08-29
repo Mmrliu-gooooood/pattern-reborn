@@ -28,7 +28,6 @@ _WINDOWS_RESERVED_BASENAMES = frozenset(
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
 )
-_MOCKUP_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _SECRET_SHAPED = re.compile(
     r"(?i)(?:api[_-]?key|\bauthorization\b|\bbearer\b|\bbasic\s+\S+|sk-[A-Za-z0-9._-]+)"
 )
@@ -180,34 +179,17 @@ class Exporter:
         return copied
 
     def _copy_mockup_assets(self, project: ProjectRecord, package: Path) -> list[_CopiedFile]:
-        _ = project
-        mockups_root = (self._project_root / "mockups").resolve()
-        if not mockups_root.is_dir() or not mockups_root.is_relative_to(self._project_root):
-            return []
         copied: list[_CopiedFile] = []
         used: set[str] = set()
-        candidates = sorted(
-            path
-            for path in mockups_root.rglob("*")
-            if path.is_file() and path.suffix.lower() in _MOCKUP_IMAGE_SUFFIXES
-        )
-        for index, source in enumerate(candidates, start=1):
-            try:
-                resolved = source.resolve()
-            except OSError:
-                continue
-            if not resolved.is_file():
-                continue
-            if not resolved.is_relative_to(mockups_root):
-                continue
-            dest_name = _unique_name(resolved.name, f"mockup-{index}", used)
-            relative_source = resolved.relative_to(self._project_root).as_posix()
+        for index, relative in enumerate(_current_mockups(project), start=1):
+            source = self._resolve_input(relative)
+            dest_name = _unique_name(source.name, f"mockup-{index}", used)
             copied.append(
                 self._copy_asset(
-                    relative_source,
+                    relative,
                     package / "mockups" / dest_name,
                     "mockup",
-                    ai_assisted=_mockup_ai_assisted(resolved),
+                    ai_assisted=_mockup_ai_assisted(source),
                     package=package,
                 )
             )
@@ -341,6 +323,14 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
 def _current_generations(project: ProjectRecord) -> list[GenerationRecord]:
     stale = set(project.stale_artifacts)
     return [item for item in project.generations if item.artifact_path not in stale]
+
+
+def _current_mockups(project: ProjectRecord) -> list[str]:
+    stale = set(project.stale_artifacts)
+    raw = project.processing_parameters.get("current_mockups")
+    if not isinstance(raw, list):
+        return []
+    return [path for path in raw if isinstance(path, str) and path not in stale]
 
 
 def _mockup_ai_assisted(image_path: Path) -> bool:

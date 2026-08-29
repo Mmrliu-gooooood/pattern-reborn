@@ -207,3 +207,37 @@ def test_make_mockup_rejects_stale_pattern_after_invalidation(app_service, sourc
     app_service.confirm_extraction(project.id, second.artifact_id)
     with pytest.raises(WorkflowError, match="贴图"):
         app_service.make_mockup(project.id, "bookmark", pattern.artifact_id)
+
+
+def test_reconfirm_extraction_does_not_export_stale_mockups(
+    app_service, source_fixture: Path
+) -> None:
+    project = _create(app_service, source_fixture)
+    _extract_and_confirm(app_service, project.id)
+    app_service.analyze(project.id)
+    pattern = app_service.compose(
+        project.id,
+        PatternRequest(layout=LayoutKind.RADIAL, canvas=(128, 128), seed=7),
+    )
+    mockup = app_service.make_mockup(project.id, "bookmark", pattern.artifact_id)
+    mockup_bytes = mockup.path.read_bytes()
+    recorded = app_service.load_project(project.id)
+    assert mockup.artifact_id in recorded.processing_parameters.get("current_mockups", [])
+
+    second = app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
+    updated = app_service.confirm_extraction(project.id, second.artifact_id)
+    current = updated.processing_parameters.get("current_mockups")
+    assert mockup.artifact_id not in (current or [])
+    assert mockup.path.exists()
+    assert mockup.path.read_bytes() == mockup_bytes
+
+    package = app_service.export(
+        project.id,
+        ExportSelection(mockups=True, report=True),
+    )
+    mockups_dir = package / "mockups"
+    exported = list(mockups_dir.glob("*.png")) if mockups_dir.exists() else []
+    assert exported == []
+    assert not any(path.read_bytes() == mockup_bytes for path in package.rglob("*.png"))
+    if mockups_dir.exists():
+        assert not any(path.suffix.lower() == ".json" for path in mockups_dir.rglob("*"))
