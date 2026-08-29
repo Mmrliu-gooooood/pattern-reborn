@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Optional VTracer adapter. Missing or invalid SVG never blocks PNG workflows."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from xml.etree import ElementTree as ET
 
 
 class VectorizeError(ValueError):
@@ -93,9 +95,11 @@ def _is_svg(path: Path) -> bool:
     try:
         if not path.is_file() or path.stat().st_size <= 0:
             return False
-        return "<svg" in path.read_text(encoding="utf-8", errors="replace").lower()
-    except OSError:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
         return False
+    local_name = root.tag.rsplit("}", 1)[-1]
+    return local_name.lower() == "svg"
 
 
 def _discard_temporary_file(path: Path) -> None:
