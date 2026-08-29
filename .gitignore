@@ -22,9 +22,9 @@ outputs/
 build/
 dist/
 *.egg-info/
+.worktrees/
 .idea/
 .vscode/
 
 # Superpowers visual brainstorming artifacts
 .superpowers/
-
