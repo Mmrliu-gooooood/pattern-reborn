@@ -26,10 +26,7 @@ _GENERATION_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 
 
 def _generation_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/generation"):
-        return normalized
-    return f"{normalized}{_GENERATION_PATH}"
+    return f"{base_url.rstrip('/')}{_GENERATION_PATH}"
 
 
 def _qwen_size(size: str) -> str:

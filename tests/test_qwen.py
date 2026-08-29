@@ -28,7 +28,7 @@ def _png_bytes() -> bytes:
 
 PNG_BYTES = _png_bytes()
 PNG_BASE64 = base64.b64encode(PNG_BYTES).decode("ascii")
-QWEN_URL = "https://qwen.example/generation"
+QWEN_URL = "https://qwen.example/api/v1/services/aigc/multimodal-generation/generation"
 RESULT_URL = "https://temporary.example/result.png"
 QWEN_FULL_RESPONSE = {
     "output": {
@@ -62,7 +62,7 @@ def make_qwen(tmp_path: Path):
 
     return QwenAdapter(
         client=httpx.Client(),
-        base_url="https://qwen.example/generation",
+        base_url="https://qwen.example",
         output_dir=tmp_path / "generated",
     )
 

@@ -86,7 +86,7 @@ def make_service(tmp_path: Path, resolver=None):
         ),
         ProviderId.QWEN: QwenAdapter(
             client=httpx.Client(),
-            base_url="https://qwen.example/generation",
+            base_url="https://qwen.example",
             output_dir=generated,
         ),
     }
@@ -96,7 +96,9 @@ def make_service(tmp_path: Path, resolver=None):
 def test_service_dispatches_to_requested_qwen_provider_only(
     respx_mock, qwen_request, tmp_path
 ) -> None:
-    qwen_route = respx_mock.post("https://qwen.example/generation").respond(
+    qwen_route = respx_mock.post(
+        "https://qwen.example/api/v1/services/aigc/multimodal-generation/generation"
+    ).respond(
         json=QWEN_FULL_RESPONSE
     )
     respx_mock.get(RESULT_URL).respond(
