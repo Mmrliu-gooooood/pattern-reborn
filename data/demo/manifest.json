@@ -1,3 +1,34 @@
 {
-  "cases": []
+  "cases": [
+    {
+      "id": "lotus-paper-cut",
+      "title_zh": "剪纸莲花式团花",
+      "source": "lotus-paper-cut/source.jpg"
+    },
+    {
+      "id": "fish-lotus-blue-calico",
+      "title_zh": "蓝印花布鱼莲纹",
+      "source": "fish-lotus-blue-calico/source.jpg"
+    },
+    {
+      "id": "peony-embroidery",
+      "title_zh": "刺绣牡丹",
+      "source": "peony-embroidery/source.jpg"
+    },
+    {
+      "id": "scrolling-lotus-ceramic",
+      "title_zh": "青花缠枝莲",
+      "source": "scrolling-lotus-ceramic/source.jpg"
+    },
+    {
+      "id": "new-year-picture-detail",
+      "title_zh": "年画门神局部纹饰",
+      "source": "new-year-picture-detail/source.jpg"
+    },
+    {
+      "id": "architectural-cloud",
+      "title_zh": "建筑彩画与剔犀云纹",
+      "source": "architectural-cloud/source.jpg"
+    }
+  ]
 }

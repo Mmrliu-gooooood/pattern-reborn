@@ -1,0 +1,60 @@
+{
+  "title": "年画门神局部纹饰",
+  "category": "folk_painting",
+  "profile": "flat_color",
+  "source_filename": "source.jpg",
+  "sha256": "b4193ae45267870fd9d674dd8f6d7af01c6da77643438b522ea6e0ac16b5f7f7",
+  "creator_institution": "Alexey Parygin's Collection (scan); anonymous workshop",
+  "source_url": "https://commons.wikimedia.org/wiki/File:1900s_Nianhua_The_Spirit_of_the_Doors_woodblock_print.jpg",
+  "bibliography": null,
+  "license": "Public Domain",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "nianhua_menshen_ornament",
+    "regions": {
+      "full": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "robe": [
+        0.18,
+        0.28,
+        0.78,
+        0.78
+      ],
+      "roundel": [
+        0.38,
+        0.36,
+        0.62,
+        0.58
+      ],
+      "hem_lian": [
+        0.22,
+        0.68,
+        0.78,
+        0.92
+      ]
+    },
+    "segmentation": {
+      "k": 7,
+      "median": 3
+    },
+    "local_redesign": {
+      "drop_low_chroma": 18,
+      "paper_ground": "#F5ECD6",
+      "roundel_tile": [
+        3,
+        3
+      ]
+    },
+    "face_policy": "do_not_use_as_trademark"
+  },
+  "expected_result": "原年画作色彩与套版错位参照；袍服局部同时出现龙纹、团花、水脚；胸前团花人工框选；K=7 彩色区域分割得到可分版色块。局部再设计默认不使用门神面部。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。"
+  }
+}

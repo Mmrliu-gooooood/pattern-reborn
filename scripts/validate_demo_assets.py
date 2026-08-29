@@ -282,10 +282,11 @@ def _is_search_engine_url(value: str) -> bool:
     parsed = urlparse(value)
     host = parsed.netloc.lower()
     path = parsed.path.lower()
-    if "/search" in path:
-        return True
+    query = parsed.query.lower()
     markers = ("google.", "bing.", "baidu.", "yandex.", "images.example")
-    return any(marker in host for marker in markers)
+    if any(marker in host for marker in markers):
+        return True
+    return "/search" in path and bool(query)
 
 
 def _contained_path(root: Path, relative: str) -> Path | None:

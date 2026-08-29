@@ -1,0 +1,53 @@
+{
+  "title": "青花缠枝莲",
+  "category": "ceramic_ornament",
+  "profile": "artifact_photo",
+  "source_filename": "source.jpg",
+  "sha256": "f63fc060abd4aad341a9b1b56b6d146536fa54e8cce14a11ed93c849e33c7f51",
+  "creator_institution": "三十三画生",
+  "source_url": "https://commons.wikimedia.org/wiki/File:%E9%9D%92%E8%8A%B1%E7%BC%A0%E6%9E%9D%E8%8E%B2%E7%BA%B9%E8%8F%B1%E8%8A%B1%E5%8F%A3%E7%9B%98%E7%BB%86%E9%83%A8.jpg",
+  "bibliography": null,
+  "license": "CC BY-SA 4.0",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "qinghua_chanzhilian",
+    "manual_box": [
+      0.28,
+      0.18,
+      0.62,
+      0.72
+    ],
+    "perspective": {
+      "enabled": true,
+      "quad": [
+        40,
+        30,
+        "W-20",
+        50,
+        "W-8",
+        "H-12",
+        18,
+        "H-8"
+      ]
+    },
+    "recolor": {
+      "keep_blue_white": true,
+      "cobalt": "#1E4B8A",
+      "white": "#F5F8F2",
+      "luma_split": 168
+    },
+    "tile": {
+      "repeat": [
+        3,
+        3
+      ],
+      "mirror_alternate": true
+    }
+  },
+  "expected_result": "原器弧面照片，花头随盘壁变形；人工框选一朵莲花及其缠枝；透视辅助拉平得到更接近展开纹样的单元；蓝白配色保持，钴料归 #1E4B8A，釉白归 #F5F8F2。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。文物摄影许可不等于馆藏商业授权。"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "title": "建筑彩画与剔犀云纹",
+  "category": "architectural_ornament",
+  "profile": "artifact_photo",
+  "source_filename": "source.jpg",
+  "sha256": "91da44e87a39a1cdcc349b7e636ec8d39d962e086eea0e947615351c60d46f6d",
+  "creator_institution": "秋水平湖",
+  "source_url": "https://commons.wikimedia.org/wiki/File:%E5%A4%AA%E5%92%8C%E6%AE%BF%E6%A9%AB%E6%A8%91%E7%9A%84%E9%87%91%E9%BE%8D%E5%92%8C%E7%92%BD%E5%BD%A9%E7%95%AB.JPG",
+  "bibliography": null,
+  "license": "CC BY-SA 3.0",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "caihua_yunwen",
+    "beam_roi": [
+      0.18,
+      0.22,
+      0.82,
+      0.62
+    ],
+    "cloud_roi": [
+      0.02,
+      0.62,
+      0.28,
+      0.98
+    ],
+    "tixi_roi": [
+      0.28,
+      0.18,
+      0.72,
+      0.72
+    ],
+    "unsharp": {
+      "radius": 2.2,
+      "percent": 210,
+      "threshold": 2
+    },
+    "edge": {
+      "operator": "sobel",
+      "overlay": "#FFE656",
+      "threshold": 48
+    },
+    "symmetry": {
+      "mode": "bilateral",
+      "axis": "vertical"
+    }
+  },
+  "expected_result": "梁枋方心局部；轮廓增强使沥粉金线更清楚；金黄边缘叠加检查断线；梯度幅值图供矢量描边。补充剔犀原图未收录。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。补充剔犀照片未收录。故宫实地商业拍摄另受故宫博物院管理规定约束。"
+  }
+}

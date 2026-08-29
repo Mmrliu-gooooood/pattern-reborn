@@ -1,0 +1,46 @@
+{
+  "title": "剪纸莲花式团花",
+  "category": "paper_cutting",
+  "profile": "silhouette",
+  "source_filename": "source.jpg",
+  "sha256": "fa5d35712480bac79f77fc25adda892044842aa668b74ac14f857dfdd5230173",
+  "creator_institution": "Sean Chiu",
+  "source_url": "https://commons.wikimedia.org/wiki/File:%E5%AE%A2%E5%AE%B6%E4%BA%94%E7%A6%8F%E5%89%AA%E7%B4%99.jpg",
+  "bibliography": null,
+  "license": "CC BY-SA 4.0",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "jianzhi_lotus_rosette",
+    "roi": [
+      0.02,
+      0.08,
+      0.22,
+      0.62
+    ],
+    "color_model": "rgb",
+    "red_chroma_delta": 70,
+    "red_min": 120,
+    "binarize": "red_vs_bg",
+    "edge": {
+      "operator": "sobel",
+      "overlay_threshold": 48
+    },
+    "mirror": {
+      "axis": "xy",
+      "folds": 2
+    },
+    "radial": {
+      "folds": 8,
+      "center": "rosette",
+      "canvas": 720
+    },
+    "output_bg": "#FFFFFF",
+    "keep_color": "#C41216"
+  },
+  "expected_result": "裁出单幅门笺上半团花；按红色度分离得到红白剪影，镂空为白色负形；Sobel 边缘叠加，检查锯齿、断刀与粘连；输出可矢量描摹的二值轮廓。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。原图 CC BY-SA 4.0，必须署名 Sean Chiu。"
+  }
+}

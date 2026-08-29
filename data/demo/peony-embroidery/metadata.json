@@ -1,0 +1,44 @@
+{
+  "title": "刺绣牡丹",
+  "category": "embroidery_brocade",
+  "profile": "textile",
+  "source_filename": "source.jpg",
+  "sha256": "702db0e13fa00ec3c9b9f23c05dcf2c2aace0a6d31b2487324721ad8c7206a3e",
+  "creator_institution": "The Metropolitan Museum of Art, 1987.277",
+  "source_url": "https://www.metmuseum.org/art/collection/search/39735",
+  "bibliography": null,
+  "license": "CC0 / The Met Open Access",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "cixiu_mudan",
+    "texture_suppress": {
+      "median": 5,
+      "gaussian": 1.1
+    },
+    "kmeans": {
+      "k": 6,
+      "sample": 40000,
+      "seed": 7
+    },
+    "bg_flatten": {
+      "target": "#F5EEDC",
+      "distance": 38
+    },
+    "traditional_palette": [
+      "妃色",
+      "朱红",
+      "石绿",
+      "石青",
+      "赤金",
+      "牙白",
+      "墨色",
+      "绛紫"
+    ]
+  },
+  "expected_result": "保留原绣片；纹理抑制后花瓣色阶更平滑、针脚颗粒减弱；六色量化色块便于分色制版；色带上排为提取色，下排为匹配的传统色。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。生成图不是馆藏复制件。"
+  }
+}

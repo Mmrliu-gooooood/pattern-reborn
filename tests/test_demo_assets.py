@@ -127,6 +127,17 @@ def test_validator_rejects_unclear_search_engine_image(tmp_path: Path, demo_png:
     assert any("授权" in error for error in result.errors)
 
 
+def test_validator_accepts_institution_collection_object_url(tmp_path: Path, demo_png: Path) -> None:
+    write_demo_case(
+        tmp_path,
+        source=demo_png,
+        license="CC0 / The Met Open Access",
+        source_url="https://www.metmuseum.org/art/collection/search/39735",
+        creator_institution="The Metropolitan Museum of Art, 1987.277",
+    )
+    assert validate_demo_root(tmp_path).errors == []
+
+
 def test_validator_rejects_missing_source_file(tmp_path: Path, demo_png: Path) -> None:
     write_demo_case(tmp_path, source=demo_png, copy_source=False)
     result = validate_demo_root(tmp_path)

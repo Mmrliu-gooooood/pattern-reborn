@@ -32,3 +32,17 @@ architectural-cloud
 `manifest.json` 形状：`{ "cases": [ { "id", "title_zh", "source" } ] }`，其中 `source` 是相对于 `data/demo` 且真实存在的路径。
 
 每份 `metadata.json` 必填：title、category、profile、source filename、SHA-256、creator/institution、source URL 或 bibliography、license、retrieval date、provenance（`verified_ich_source` | `traditional_reference` | `user_supplied_unverified`）、processing defaults、expected result、AI involvement。
+
+## 已收录（检索日期 2026-08-29）
+
+只收录各案例包的 `01-original.jpg`，复制为 `source.jpg`。SHA-256 为仓库内复制件字节。
+
+| Case ID | 标题 | License | SHA-256 |
+|---|---|---|---|
+| lotus-paper-cut | 剪纸莲花式团花 | CC BY-SA 4.0 | `fa5d35712480bac79f77fc25adda892044842aa668b74ac14f857dfdd5230173` |
+| fish-lotus-blue-calico | 蓝印花布鱼莲纹 | Public Domain | `a90bbb81a53755d39659d8f03fea4989eabdce57575856db0e8367f735601994` |
+| peony-embroidery | 刺绣牡丹 | CC0 / The Met Open Access | `702db0e13fa00ec3c9b9f23c05dcf2c2aace0a6d31b2487324721ad8c7206a3e` |
+| scrolling-lotus-ceramic | 青花缠枝莲 | CC BY-SA 4.0 | `f63fc060abd4aad341a9b1b56b6d146536fa54e8cce14a11ed93c849e33c7f51` |
+| new-year-picture-detail | 年画门神局部纹饰 | Public Domain | `b4193ae45267870fd9d674dd8f6d7af01c6da77643438b522ea6e0ac16b5f7f7` |
+| architectural-cloud | 建筑彩画与剔犀云纹 | CC BY-SA 3.0 | `91da44e87a39a1cdcc349b7e636ec8d39d962e086eea0e947615351c60d46f6d` |
+

@@ -1,0 +1,51 @@
+{
+  "title": "蓝印花布鱼莲纹",
+  "category": "dyeing_textile",
+  "profile": "textile",
+  "source_filename": "source.jpg",
+  "sha256": "a90bbb81a53755d39659d8f03fea4989eabdce57575856db0e8367f735601994",
+  "creator_institution": "上海博物馆",
+  "source_url": "https://commons.wikimedia.org/wiki/File:%E8%8B%8F%E5%B7%9E%E9%87%91%E9%B1%BC%E8%8D%B7%E8%8A%B1%E8%93%9D%E5%8D%B0%E8%8A%B1%E5%B8%83%E8%A2%AB%E9%9D%A2.jpg",
+  "bibliography": null,
+  "license": "Public Domain",
+  "retrieval_date": "2026-08-29",
+  "provenance": "traditional_reference",
+  "processing_defaults": {
+    "craft_preset": "lanyinhuabu_yulian",
+    "roi": [
+      0.02,
+      0.08,
+      0.72,
+      0.92
+    ],
+    "separation": {
+      "space": "luma",
+      "threshold": 128,
+      "indigo": "#1B365D",
+      "ground": "#F5F8F2"
+    },
+    "modes": [
+      "blue_ground_white_flower",
+      "white_ground_blue_flower"
+    ],
+    "unit_crop": [
+      0.18,
+      0.12,
+      0.52,
+      0.78
+    ],
+    "tile": {
+      "repeat": [
+        4,
+        3
+      ],
+      "mirror_alternate": true
+    },
+    "edge_soften": 1
+  },
+  "expected_result": "裁出被面花地，避开严重褶皱；亮度阈值分成靛蓝/牙白两版；输出蓝底白花与白底蓝花反相；从花地中切出鱼+莲的连续单元。",
+  "ai_involvement": {
+    "source_is_ai_generated": false,
+    "note": "源图非人工智能生成。案例包中的提取/重组/样机为 AI-ASSISTED DEMO；API 图为 AI-GENERATED，均未收录。原图按 Commons 标注为公有领域；建议保留上海博物馆藏信息。"
+  }
+}
