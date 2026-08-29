@@ -1,0 +1,112 @@
+{
+  "colors": [
+    {
+      "slug": "zhu-sha",
+      "name_zh": "朱砂",
+      "hex_value": "#B2372D",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "yan-zhi",
+      "name_zh": "胭脂",
+      "hex_value": "#9D2933",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "shi-qing",
+      "name_zh": "石青",
+      "hex_value": "#4D80B3",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "dian-qing",
+      "name_zh": "靛青",
+      "hex_value": "#1F3A5F",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "yue-bai",
+      "name_zh": "月白",
+      "hex_value": "#D6ECF0",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "zhu-qing",
+      "name_zh": "竹青",
+      "hex_value": "#789262",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "song-hua",
+      "name_zh": "松花",
+      "hex_value": "#B6C25A",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "dai-lu",
+      "name_zh": "黛绿",
+      "hex_value": "#426666",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "xing-huang",
+      "name_zh": "杏黄",
+      "hex_value": "#E6B422",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "hu-po",
+      "name_zh": "琥珀",
+      "hex_value": "#CA6924",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "xuan-qing",
+      "name_zh": "玄青",
+      "hex_value": "#2E3A4D",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    },
+    {
+      "slug": "jiang-zi",
+      "name_zh": "绛紫",
+      "hex_value": "#6D2E4B",
+      "reference_title": "中国传统色：故宫里的色彩美学",
+      "reference_url": null,
+      "reference_bibliography": "郭浩、李健明：《中国传统色：故宫里的色彩美学》，中信出版集团，2020",
+      "digital_value_note_zh": "数字色值为本平台近似，非通用标准。"
+    }
+  ]
+}

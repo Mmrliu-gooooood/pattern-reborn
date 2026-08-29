@@ -1,0 +1,197 @@
+{
+  "profiles": [
+    {
+      "id": "silhouette",
+      "display_name_zh": "轮廓优先",
+      "description_zh": "优先保留二值轮廓、镂空和边缘结构。",
+      "parameters": {
+        "threshold_mode": "otsu",
+        "morphology_kernel": 3,
+        "denoise_strength": 0,
+        "palette_size": 2,
+        "preserve_holes": true,
+        "manual_region_required": false
+      },
+      "limitations_zh": "复杂背景、折痕或低对比边缘会降低提取完整性，需人工检查镂空区域。"
+    },
+    {
+      "id": "flat_color",
+      "display_name_zh": "平面设色",
+      "description_zh": "优先分离色块并控制调色板数量。",
+      "parameters": {
+        "threshold_mode": "lab_kmeans",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 6,
+        "preserve_holes": false,
+        "manual_region_required": false
+      },
+      "limitations_zh": "渐变、褪色、阴影和印刷网点会混淆色块，提取结果需人工核对。"
+    },
+    {
+      "id": "textile",
+      "display_name_zh": "织物纹理",
+      "description_zh": "在抑制织物噪声时尽量保留线迹和细部。",
+      "parameters": {
+        "threshold_mode": "adaptive",
+        "morphology_kernel": 3,
+        "denoise_strength": 2,
+        "palette_size": 5,
+        "preserve_holes": true,
+        "manual_region_required": false
+      },
+      "limitations_zh": "经纬纹、毛边、反光和细密线迹可能互相干扰，提取无法保证还原每一根线。"
+    },
+    {
+      "id": "artifact_photo",
+      "display_name_zh": "器物照片",
+      "description_zh": "以人工框选为起点，容忍曲面透视和局部高光。",
+      "parameters": {
+        "threshold_mode": "grabcut_box",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 4,
+        "preserve_holes": false,
+        "manual_region_required": true
+      },
+      "limitations_zh": "曲面、遮挡、镜面反射和透视变形会限制提取；该辅助流程不能恢复照片中不可见的几何。"
+    }
+  ],
+  "categories": [
+    {
+      "id": "paper_cutting",
+      "profile": "silhouette",
+      "display_name_zh": "剪纸",
+      "cultural_note_zh": "常见视觉特征包括对称构图、连续边饰和镂空负形。",
+      "limitations_zh": "纸张阴影、折痕或背景纹理会影响轮廓提取，镂空区域需人工确认。",
+      "default_parameters": {
+        "threshold_mode": "otsu",
+        "morphology_kernel": 3,
+        "denoise_strength": 0,
+        "palette_size": 2,
+        "preserve_holes": true,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "embroidery_brocade",
+      "profile": "textile",
+      "display_name_zh": "刺绣与织锦",
+      "cultural_note_zh": "可观察线迹方向、重复组织与局部配色关系。",
+      "limitations_zh": "细线、经纬纹和反光会干扰提取，无法保证逐线还原。",
+      "default_parameters": {
+        "threshold_mode": "adaptive",
+        "morphology_kernel": 3,
+        "denoise_strength": 2,
+        "palette_size": 5,
+        "preserve_holes": true,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "dyeing_textile",
+      "profile": "textile",
+      "display_name_zh": "印染织物",
+      "cultural_note_zh": "可观察蓝白对比、留白边界与染色层次。",
+      "limitations_zh": "渗染边缘、布料褶皱和褪色会影响提取，需人工调整色块边界。",
+      "default_parameters": {
+        "threshold_mode": "adaptive",
+        "morphology_kernel": 3,
+        "denoise_strength": 2,
+        "palette_size": 4,
+        "preserve_holes": true,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "ceramic_ornament",
+      "profile": "artifact_photo",
+      "display_name_zh": "陶瓷纹饰",
+      "cultural_note_zh": "可观察器表纹样的连续关系、釉色层次和局部构图。",
+      "limitations_zh": "曲面透视、釉面高光和遮挡会限制提取，无法从单张照片复原隐藏图形。",
+      "default_parameters": {
+        "threshold_mode": "grabcut_box",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 4,
+        "preserve_holes": false,
+        "manual_region_required": true
+      }
+    },
+    {
+      "id": "lacquer_ornament",
+      "profile": "flat_color",
+      "display_name_zh": "漆器纹饰",
+      "cultural_note_zh": "可观察层叠色面、描边与装饰性留白。",
+      "limitations_zh": "反光、磨损和暗部会混淆色块，提取结果需人工检查。",
+      "default_parameters": {
+        "threshold_mode": "lab_kmeans",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 5,
+        "preserve_holes": false,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "folk_painting",
+      "profile": "flat_color",
+      "display_name_zh": "年画与民间绘画",
+      "cultural_note_zh": "可观察平面设色、人物或花鸟题材与局部装饰边框。",
+      "limitations_zh": "印刷网点、纸张老化和复杂配色会影响色块提取，需人工核对。",
+      "default_parameters": {
+        "threshold_mode": "lab_kmeans",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 8,
+        "preserve_holes": false,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "architectural_ornament",
+      "profile": "flat_color",
+      "display_name_zh": "建筑彩画与砖木雕",
+      "cultural_note_zh": "可观察边饰、云纹、几何分格与局部设色。",
+      "limitations_zh": "风化、阴影、透视和材质纹理会降低提取稳定性，需人工确认边缘。",
+      "default_parameters": {
+        "threshold_mode": "lab_kmeans",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 6,
+        "preserve_holes": false,
+        "manual_region_required": false
+      }
+    },
+    {
+      "id": "metal_jewelry",
+      "profile": "artifact_photo",
+      "display_name_zh": "金银与首饰纹饰",
+      "cultural_note_zh": "可观察錾刻、镂空、镶嵌和局部重复纹样。",
+      "limitations_zh": "镜面反射、阴影、曲面和遮挡会限制提取，无法恢复不可见细节。",
+      "default_parameters": {
+        "threshold_mode": "grabcut_box",
+        "morphology_kernel": 3,
+        "denoise_strength": 1,
+        "palette_size": 4,
+        "preserve_holes": true,
+        "manual_region_required": true
+      }
+    },
+    {
+      "id": "folk_crafts",
+      "profile": "silhouette",
+      "display_name_zh": "风筝、皮影与面具",
+      "cultural_note_zh": "可观察外轮廓、穿孔、对称关系和局部彩绘。",
+      "limitations_zh": "悬挂线、背景干扰和立体阴影会影响提取，需人工确认孔洞与边缘。",
+      "default_parameters": {
+        "threshold_mode": "otsu",
+        "morphology_kernel": 3,
+        "denoise_strength": 0,
+        "palette_size": 3,
+        "preserve_holes": true,
+        "manual_region_required": false
+      }
+    }
+  ]
+}
