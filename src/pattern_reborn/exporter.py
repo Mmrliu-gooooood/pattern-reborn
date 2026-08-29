@@ -27,8 +27,8 @@ _MOCKUP_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _SECRET_MATERIAL = re.compile(
     r"(?i)("
     r"api[_-]?key\s*[=:]\s*\S+"
+    r"|authorization\s*[=:]\s*(?:bearer\s+)?\S+"
     r"|bearer\s+\S+"
-    r"|authorization\s*[=:]\s*\S+"
     r"|sk-[A-Za-z0-9._-]+"
     r")"
 )
@@ -391,13 +391,14 @@ def _unique_name(source_ref: str, fallback: str, used: set[str]) -> str:
     if suffix and _UNSAFE_FILENAME.search(suffix):
         suffix = ""
     candidate = f"{stem}{suffix}" if suffix else stem
-    if candidate not in used:
+    taken = {name.lower() for name in used}
+    if candidate.lower() not in taken:
         used.add(candidate)
         return candidate
     index = 2
     while True:
         name = f"{stem}-{index}{suffix}" if suffix else f"{stem}-{index}"
-        if name not in used:
+        if name.lower() not in taken:
             used.add(name)
             return name
         index += 1

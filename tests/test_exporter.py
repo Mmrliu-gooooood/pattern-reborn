@@ -326,6 +326,23 @@ def test_export_redacts_prompt_secrets_before_json_dumps(project, tmp_path) -> N
     assert "abc" not in raw
 
 
+def test_export_redacts_authorization_bearer_token(project, tmp_path) -> None:
+    project.generations[0].prompt = "keep-me Authorization: Bearer secret-value"
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    assert "keep-me" in manifest["generations"][0]["prompt"]
+    for path in package.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        assert "secret-value" not in text
+
+
 def test_provenance_discloses_ai_mockup_without_generations(project, tmp_path) -> None:
     project.generations = []
     project_dir = _project_dir(tmp_path, project)
@@ -360,6 +377,29 @@ def test_sanitized_pattern_basename_collisions_stay_unique(project, tmp_path) ->
     paths = [item["path"] for item in manifest["files"] if item["kind"] == "pattern"]
     assert len(paths) == 2
     assert len(set(paths)) == 2
+
+
+def test_case_insensitive_pattern_names_stay_unique(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    patterns_dir = project_dir / "patterns"
+    nested = patterns_dir / "nested"
+    nested.mkdir()
+    first = write_image(patterns_dir / "A.png", image_format="PNG", size=(10, 8))
+    second = write_image(nested / "a.png", image_format="PNG", size=(12, 8))
+    project.artifacts.recomposition = ["patterns/A.png", "patterns/nested/a.png"]
+    package = Exporter(project_dir).export(project, ExportSelection(patterns=True, report=True), tmp_path)
+
+    copied = list((package / "patterns").glob("*.png"))
+    assert len(copied) == 2
+    assert len({path.name.lower() for path in copied}) == 2
+    exported_bytes = {path.read_bytes() for path in copied}
+    assert first.read_bytes() in exported_bytes
+    assert second.read_bytes() in exported_bytes
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    paths = [item["path"] for item in manifest["files"] if item["kind"] == "pattern"]
+    assert len(paths) == 2
+    assert len(set(paths)) == 2
+    assert len({path.lower() for path in paths}) == 2
 
 
 def test_source_bytes_stay_identical_after_export(project, tmp_path) -> None:
