@@ -1,0 +1,339 @@
+# -*- coding: utf-8 -*-
+"""Atomic provenance export packages with copied assets and reports."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict
+
+from pattern_reborn.domain import GenerationRecord, ProjectRecord, ProvenanceClass
+
+
+class ExportError(ValueError):
+    """导出包无法安全写入。"""
+
+
+_UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_PROVENANCE_ZH = {
+    ProvenanceClass.VERIFIED_ICH_SOURCE: "已核验的传统来源",
+    ProvenanceClass.TRADITIONAL_REFERENCE: "传统参考",
+    ProvenanceClass.USER_SUPPLIED_UNVERIFIED: "用户提供（未核验）",
+}
+
+
+class ExportSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    source: bool = False
+    extracted: bool = False
+    patterns: bool = False
+    generations: bool = False
+    mockups: bool = False
+    svg: bool = False
+    report: bool = False
+
+    @classmethod
+    def all_offline(cls) -> "ExportSelection":
+        return cls(
+            source=True,
+            extracted=True,
+            patterns=True,
+            generations=True,
+            mockups=True,
+            svg=True,
+            report=True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CopiedFile:
+    path: str
+    kind: str
+    sha256: str
+    ai_assisted: bool
+
+
+class Exporter:
+    def __init__(self, project_root: Path | None = None) -> None:
+        self._project_root = Path(project_root).resolve() if project_root is not None else None
+
+    def export(
+        self,
+        project: ProjectRecord,
+        selection: ExportSelection,
+        destination_root: Path,
+    ) -> Path:
+        destination = Path(destination_root)
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+            destination = destination.resolve()
+        except OSError as error:
+            raise ExportError("导出目录无法创建或访问。") from error
+
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        package_name = f"{stamp}_{_sanitize_filename(project.name)}"
+        final_dir = _contained_path(destination / package_name, destination)
+        temporary = _contained_path(destination / f".{package_name}.{uuid4().hex}.tmp", destination)
+        try:
+            temporary.mkdir(parents=False)
+            copied = self._write_selected_assets(project, selection, temporary)
+            _write_manifest(project, copied, temporary)
+            _write_attribution(project, temporary)
+            if selection.report:
+                _write_provenance(project, temporary)
+            os.replace(temporary, final_dir)
+        except ExportError:
+            _discard_tree(temporary)
+            raise
+        except OSError as error:
+            _discard_tree(temporary)
+            raise ExportError("导出包写入失败，原目录未被替换。") from error
+        return final_dir
+
+    def _write_selected_assets(
+        self,
+        project: ProjectRecord,
+        selection: ExportSelection,
+        package: Path,
+    ) -> list[_CopiedFile]:
+        copied: list[_CopiedFile] = []
+        if selection.source:
+            copied.append(
+                self._copy_asset(
+                    project.source.relative_path,
+                    package / "source" / _sanitize_filename(project.source.original_filename, "source.bin"),
+                    "source",
+                    ai_assisted=False,
+                    package=package,
+                )
+            )
+        if selection.extracted:
+            for index, relative in enumerate(project.artifacts.extraction, start=1):
+                copied.append(
+                    self._copy_asset(
+                        relative,
+                        package / "extracted" / _unique_name(relative, f"extracted-{index}"),
+                        "extracted",
+                        ai_assisted=False,
+                        package=package,
+                    )
+                )
+        if selection.patterns:
+            for index, relative in enumerate(project.artifacts.recomposition, start=1):
+                copied.append(
+                    self._copy_asset(
+                        relative,
+                        package / "patterns" / _unique_name(relative, f"pattern-{index}"),
+                        "pattern",
+                        ai_assisted=False,
+                        package=package,
+                    )
+                )
+        if selection.generations:
+            for index, generation in enumerate(project.generations, start=1):
+                copied.append(
+                    self._copy_asset(
+                        generation.artifact_path,
+                        package / "generated" / _unique_name(generation.artifact_path, f"generated-{index}"),
+                        "generation",
+                        ai_assisted=True,
+                        package=package,
+                    )
+                )
+        if selection.svg:
+            for index, relative in enumerate(project.artifacts.recomposition, start=1):
+                if Path(relative).suffix.lower() != ".svg":
+                    continue
+                copied.append(
+                    self._copy_asset(
+                        relative,
+                        package / "svg" / _unique_name(relative, f"pattern-{index}"),
+                        "svg",
+                        ai_assisted=False,
+                        package=package,
+                    )
+                )
+        return copied
+
+    def _copy_asset(
+        self,
+        source_ref: str,
+        destination: Path,
+        kind: str,
+        *,
+        ai_assisted: bool,
+        package: Path,
+    ) -> _CopiedFile:
+        source = self._resolve_input(source_ref)
+        target = _contained_path(destination, package)
+        try:
+            data = source.read_bytes()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.parent / f".{target.name}.{uuid4().hex}.tmp"
+            temporary.write_bytes(data)
+            os.replace(temporary, target)
+        except OSError as error:
+            raise ExportError("导出文件复制失败。") from error
+        relative = target.relative_to(package).as_posix()
+        return _CopiedFile(
+            path=relative,
+            kind=kind,
+            sha256=hashlib.sha256(data).hexdigest(),
+            ai_assisted=ai_assisted,
+        )
+
+    def _resolve_input(self, relative_path: str) -> Path:
+        candidate = Path(relative_path)
+        if candidate.is_absolute():
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError as error:
+                raise ExportError("导出源文件不存在或无法读取。") from error
+            return resolved
+        if self._project_root is None:
+            raise ExportError("无法解析导出源路径。")
+        resolved = (self._project_root / candidate).resolve()
+        if not resolved.is_relative_to(self._project_root):
+            raise ExportError("导出源路径超出项目目录。")
+        if not resolved.is_file():
+            raise ExportError("导出源文件不存在或无法读取。")
+        return resolved
+
+
+def _write_manifest(project: ProjectRecord, copied: list[_CopiedFile], package: Path) -> None:
+    payload = {
+        "schema_version": 1,
+        "project_id": project.id,
+        "project_name": project.name,
+        "exported_at": _iso(datetime.now(UTC)),
+        "source": {
+            "original_filename": project.source.original_filename,
+            "sha256": project.source.sha256,
+            "byte_size": project.source.byte_size,
+            "provenance": project.provenance.value,
+        },
+        "files": [
+            {
+                "path": item.path,
+                "kind": item.kind,
+                "sha256": item.sha256,
+                "ai_assisted": item.ai_assisted,
+            }
+            for item in copied
+        ],
+        "generations": [_generation_entry(item) for item in project.generations],
+    }
+    _write_utf8(package / "manifest.json", json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _write_attribution(project: ProjectRecord, package: Path) -> None:
+    lines = [
+        "# 署名",
+        "",
+        "## 项目原创",
+        "",
+        "- 文化产品贴图模板由 Pattern Reborn team 绘制，许可为 project-original。",
+        "",
+        "## 源材料",
+        "",
+        f"- 原始文件名：{project.source.original_filename}",
+        f"- SHA-256：{project.source.sha256}",
+        f"- 来源分类：{_PROVENANCE_ZH[project.provenance]}（{project.provenance.value}）",
+        "",
+    ]
+    _write_utf8(package / "attribution.md", "\n".join(lines))
+
+
+def _write_provenance(project: ProjectRecord, package: Path) -> None:
+    lines = [
+        "# 出处报告",
+        "",
+        f"- 项目：{project.name}",
+        f"- 项目标识：{project.id}",
+        f"- 源文件 SHA-256：{project.source.sha256}",
+        f"- 原始文件名：{project.source.original_filename}",
+        f"- 来源分类：{_PROVENANCE_ZH[project.provenance]}（{project.provenance.value}）",
+        "",
+    ]
+    if project.generations:
+        lines.extend(
+            [
+                "## AI 辅助",
+                "",
+                "本导出包含生成式模型产出的衍生结果，下列记录已标注为 AI 辅助。",
+                "",
+            ]
+        )
+        for item in project.generations:
+            lines.extend(
+                [
+                    f"- 标识：{item.id}",
+                    f"- 提供方：{item.provider}",
+                    f"- 模型：{item.model}",
+                    f"- 提示词：{item.prompt}",
+                    f"- 时间：{_iso(item.created_at)}",
+                    "",
+                ]
+            )
+    _write_utf8(package / "provenance.md", "\n".join(lines))
+
+
+def _generation_entry(item: GenerationRecord) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "provider": item.provider,
+        "model": item.model,
+        "prompt": item.prompt,
+        "created_at": _iso(item.created_at),
+        "ai_assisted": True,
+    }
+
+
+def _sanitize_filename(name: str, fallback: str = "export") -> str:
+    collapsed = name.replace("..", "")
+    cleaned = _UNSAFE_FILENAME.sub("_", collapsed).strip(" .")
+    if not cleaned or cleaned in {".", ".."}:
+        return fallback
+    return cleaned[:80]
+
+
+def _unique_name(source_ref: str, fallback: str) -> str:
+    original = Path(source_ref).name
+    stem = _sanitize_filename(Path(original).stem, fallback)
+    suffix = Path(original).suffix.lower()
+    if suffix and _UNSAFE_FILENAME.search(suffix):
+        suffix = ""
+    return f"{stem}{suffix}" if suffix else stem
+
+
+def _iso(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _write_utf8(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _contained_path(path: Path, root: Path) -> Path:
+    try:
+        resolved = path if path.is_absolute() else (root / path)
+        resolved = resolved.resolve()
+        container = root.resolve()
+    except OSError as error:
+        raise ExportError("导出路径无法解析。") from error
+    if not resolved.is_relative_to(container):
+        raise ExportError("导出路径超出允许的目标目录。")
+    return resolved
+
+
+def _discard_tree(path: Path) -> None:
+    shutil.rmtree(path, ignore_errors=True)

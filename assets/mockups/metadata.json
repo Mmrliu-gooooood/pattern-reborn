@@ -1,0 +1,91 @@
+{
+  "templates": [
+    {
+      "id": "bookmark",
+      "filename": "bookmark.png",
+      "creator": "Pattern Reborn team",
+      "license": "project-original",
+      "date": "2026-08-29",
+      "dimensions": [
+        240,
+        640
+      ],
+      "placement_polygon": [
+        [
+          48,
+          80
+        ],
+        [
+          192,
+          80
+        ],
+        [
+          192,
+          560
+        ],
+        [
+          48,
+          560
+        ]
+      ]
+    },
+    {
+      "id": "tote_bag",
+      "filename": "tote_bag.png",
+      "creator": "Pattern Reborn team",
+      "license": "project-original",
+      "date": "2026-08-29",
+      "dimensions": [
+        480,
+        560
+      ],
+      "placement_polygon": [
+        [
+          110,
+          180
+        ],
+        [
+          370,
+          180
+        ],
+        [
+          370,
+          480
+        ],
+        [
+          110,
+          480
+        ]
+      ]
+    },
+    {
+      "id": "phone_case",
+      "filename": "phone_case.png",
+      "creator": "Pattern Reborn team",
+      "license": "project-original",
+      "date": "2026-08-29",
+      "dimensions": [
+        280,
+        560
+      ],
+      "placement_polygon": [
+        [
+          56,
+          108
+        ],
+        [
+          224,
+          108
+        ],
+        [
+          224,
+          500
+        ],
+        [
+          56,
+          500
+        ]
+      ]
+    }
+  ]
+}
