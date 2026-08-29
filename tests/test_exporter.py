@@ -472,6 +472,51 @@ def test_export_redacts_secret_in_filename_suffix(project, tmp_path) -> None:
         assert (package / entry["path"]).is_file()
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _assert_not_windows_reserved(filename: str) -> None:
+    assert Path(filename).stem.upper() not in _WINDOWS_RESERVED_NAMES
+
+
+def test_windows_reserved_source_filename_is_sanitized(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    project.source.original_filename = "CON.png"
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(source=True, patterns=True, report=True),
+        tmp_path,
+    )
+    exported = list((package / "source").glob("*"))
+    assert exported
+    _assert_not_windows_reserved(exported[0].name)
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["source"]["original_filename"] == "CON.png"
+
+
+def test_windows_reserved_pattern_filename_is_sanitized(project, tmp_path) -> None:
+    project_dir = _project_dir(tmp_path, project)
+    patterns_dir = project_dir / "patterns"
+    pattern = write_image(patterns_dir / "NUL.png", image_format="PNG", size=(10, 8))
+    project.artifacts.recomposition = ["patterns/NUL.png"]
+    package = Exporter(project_dir).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+    copied = list((package / "patterns").glob("*.png"))
+    assert len(copied) == 1
+    _assert_not_windows_reserved(copied[0].name)
+    assert copied[0].read_bytes() == pattern.read_bytes()
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    paths = [item["path"] for item in manifest["files"] if item["kind"] == "pattern"]
+    assert len(paths) == 1
+    _assert_not_windows_reserved(Path(paths[0]).name)
+
+
 def test_source_bytes_stay_identical_after_export(project, tmp_path) -> None:
     project_dir = _project_dir(tmp_path, project)
     original = (project_dir / project.source.relative_path).read_bytes()

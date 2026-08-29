@@ -23,6 +23,11 @@ class ExportError(ValueError):
 
 
 _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
 _MOCKUP_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _SECRET_SHAPED = re.compile(
     r"(?i)(?:api[_-]?key|\bauthorization\b|\bbearer\b|\bbasic\s+\S+|sk-[A-Za-z0-9._-]+)"
@@ -370,12 +375,21 @@ def _redact_payload(value: object) -> object:
     return value
 
 
+def _is_windows_reserved_basename(name: str) -> bool:
+    stem = Path(name).stem.upper()
+    return stem in _WINDOWS_RESERVED_BASENAMES
+
+
 def _sanitize_filename(name: str, fallback: str = "export") -> str:
     collapsed = name.replace("..", "")
     cleaned = _UNSAFE_FILENAME.sub("_", collapsed).strip(" .")
     cleaned = _redact_secrets(cleaned)
     if not cleaned or cleaned in {".", ".."}:
         return fallback
+    if _is_windows_reserved_basename(cleaned):
+        stem = Path(cleaned).stem
+        suffix = Path(cleaned).suffix
+        cleaned = f"_{stem}{suffix}"
     return cleaned[:80]
 
 
