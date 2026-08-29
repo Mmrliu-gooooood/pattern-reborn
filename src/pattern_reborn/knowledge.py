@@ -73,6 +73,18 @@ def _unique_ids(
     return items
 
 
+def _require_exact_membership(
+    actual: set[CategoryId | ProfileId],
+    expected: set[CategoryId | ProfileId],
+    label: str,
+) -> None:
+    if actual == expected:
+        return
+    missing = ", ".join(item.value for item in sorted(expected - actual)) or "无"
+    extra = ", ".join(item.value for item in sorted(actual - expected)) or "无"
+    raise ValueError(f"{label}必须与批准集合完全一致；缺少：{missing}；多余：{extra}。")
+
+
 class _CategoryCatalogFile(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
 
@@ -84,14 +96,22 @@ class _CategoryCatalogFile(BaseModel):
     def require_unique_profile_ids(
         cls, value: list[ProcessingProfile]
     ) -> list[ProcessingProfile]:
-        return _unique_ids(value, "id", "处理档案标识")
+        profiles = _unique_ids(value, "id", "处理档案标识")
+        _require_exact_membership(
+            {profile.id for profile in profiles}, set(ProfileId), "处理档案标识"
+        )
+        return profiles
 
     @field_validator("categories")
     @classmethod
     def require_unique_category_ids(
         cls, value: list[KnowledgeCategory]
     ) -> list[KnowledgeCategory]:
-        return _unique_ids(value, "id", "类别标识")
+        categories = _unique_ids(value, "id", "类别标识")
+        _require_exact_membership(
+            {category.id for category in categories}, set(CategoryId), "类别标识"
+        )
+        return categories
 
     @model_validator(mode="after")
     def require_defined_profiles(self) -> "_CategoryCatalogFile":

@@ -128,3 +128,56 @@ def test_load_rejects_duplicate_category_ids_with_source_and_location(tmp_path: 
     assert "categories.json" in message
     assert "JSON 位置" in message
     assert "$" in message
+
+
+def test_load_rejects_missing_required_category_with_source_and_location(
+    tmp_path: Path,
+) -> None:
+    categories = json.loads((KNOWLEDGE_DIR / "categories.json").read_text(encoding="utf-8"))
+    categories["categories"] = [
+        category
+        for category in categories["categories"]
+        if category["id"] != CategoryId.PAPER_CUTTING.value
+    ]
+    _write_catalog_copy(tmp_path, categories)
+
+    with pytest.raises(CatalogLoadError) as raised:
+        KnowledgeCatalog.load(tmp_path)
+
+    message = str(raised.value)
+    assert "categories.json" in message
+    assert "JSON 位置" in message
+    assert "$.categories" in message
+
+
+def test_load_rejects_missing_required_profile_with_source_and_location(
+    tmp_path: Path,
+) -> None:
+    categories = json.loads((KNOWLEDGE_DIR / "categories.json").read_text(encoding="utf-8"))
+    categories["profiles"] = [
+        profile
+        for profile in categories["profiles"]
+        if profile["id"] != ProfileId.TEXTILE.value
+    ]
+    for category in categories["categories"]:
+        if category["profile"] == ProfileId.TEXTILE.value:
+            category["profile"] = ProfileId.FLAT_COLOR.value
+    _write_catalog_copy(tmp_path, categories)
+
+    with pytest.raises(CatalogLoadError) as raised:
+        KnowledgeCatalog.load(tmp_path)
+
+    message = str(raised.value)
+    assert "categories.json" in message
+    assert "JSON 位置" in message
+    assert "$.profiles" in message
+
+
+def _write_catalog_copy(tmp_path: Path, categories: dict[str, object]) -> None:
+    (tmp_path / "categories.json").write_text(
+        json.dumps(categories, ensure_ascii=False), encoding="utf-8"
+    )
+    (tmp_path / "traditional_colors.json").write_text(
+        (KNOWLEDGE_DIR / "traditional_colors.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
