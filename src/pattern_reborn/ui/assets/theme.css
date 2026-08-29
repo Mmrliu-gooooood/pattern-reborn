@@ -1,0 +1,73 @@
+:root {
+  --ink-green: #1f4d3a;
+  --vermilion: #c23a2b;
+  --gilded-gold: #c6a15b;
+  --paper: #f4eee0;
+  --edit-surface: #f7f7f7;
+  --edit-border: #e6e6e6;
+}
+
+html,
+body,
+[data-testid="stAppViewContainer"] {
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+.stApp {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(ellipse at 18% 24%, rgba(198, 161, 91, 0.09) 0%, transparent 58%),
+    radial-gradient(ellipse at 86% 78%, rgba(31, 77, 58, 0.07) 0%, transparent 52%);
+}
+
+section[data-testid="stSidebar"] {
+  background-color: var(--ink-green);
+  border-right: 1px solid var(--gilded-gold);
+}
+
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] label {
+  color: #f4eee0;
+}
+
+section[data-testid="stSidebar"] [aria-checked="true"],
+section[data-testid="stSidebar"] [data-checked="true"] {
+  color: var(--vermilion);
+  border-color: var(--vermilion);
+}
+
+.ruyi-ornament {
+  opacity: 0.16;
+  color: #f4eee0;
+  margin: 0.4rem 0.2rem 1.2rem;
+}
+
+.ruyi-ornament svg {
+  width: 100%;
+  height: auto;
+}
+
+.heritage-seal {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.35em;
+  color: var(--vermilion);
+  border: 1px solid var(--gilded-gold);
+  padding: 0.6rem 0.35rem;
+  margin: 0.5rem auto 1rem;
+  display: inline-block;
+  font-size: 1.05rem;
+}
+
+button[kind="primary"] {
+  background-color: var(--vermilion);
+  border-color: var(--vermilion);
+  color: #fff;
+}
+
+[data-testid="stImage"],
+.edit-surface {
+  background: var(--edit-surface);
+  border: 1px solid var(--edit-border);
+}
