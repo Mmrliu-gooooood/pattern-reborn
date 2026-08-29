@@ -69,6 +69,23 @@ def test_canvas_and_mobile_sam_are_detected_independently_via_find_spec(monkeypa
     assert status.opencv.available is True
 
 
+def test_disable_optional_env_forces_mobile_sam_and_canvas_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PATTERN_REBORN_DISABLE_OPTIONAL", "1")
+    monkeypatch.setattr("pattern_reborn.capabilities.find_spec", lambda name: object())
+    monkeypatch.setattr(
+        "pattern_reborn.capabilities.find_vtracer", lambda: "/usr/bin/vtracer"
+    )
+    status = detect_capabilities()
+    assert status.mobile_sam.available is False
+    assert status.canvas.available is False
+    assert _has_cjk(status.mobile_sam.reason_zh)
+    assert _has_cjk(status.canvas.reason_zh)
+    assert status.vtracer.available is True
+    assert status.opencv.available is True
+
+
 def test_vtracer_status_is_independent_of_find_spec(monkeypatch) -> None:
     monkeypatch.setattr("pattern_reborn.capabilities.find_spec", lambda name: object())
     monkeypatch.setattr("pattern_reborn.capabilities.find_vtracer", lambda: None)

@@ -52,6 +52,10 @@ def _credential_present(name: str) -> bool:
     return value is not None and bool(str(value).strip())
 
 
+def _optional_disabled() -> bool:
+    return os.environ.get("PATTERN_REBORN_DISABLE_OPTIONAL", "").strip() == "1"
+
+
 def _opencv_status() -> CapabilityStatus:
     try:
         import cv2  # noqa: F401
@@ -61,9 +65,14 @@ def _opencv_status() -> CapabilityStatus:
 
 
 def detect_capabilities() -> Capabilities:
+    optional_disabled = _optional_disabled()
     vtracer_present = find_vtracer() is not None
-    mobile_sam_present = find_spec("mobile_sam") is not None
-    canvas_present = find_spec("streamlit_drawable_konva") is not None
+    mobile_sam_present = (
+        not optional_disabled and find_spec("mobile_sam") is not None
+    )
+    canvas_present = (
+        not optional_disabled and find_spec("streamlit_drawable_konva") is not None
+    )
     return Capabilities(
         opencv=_opencv_status(),
         vtracer=CapabilityStatus(
