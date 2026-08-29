@@ -44,6 +44,10 @@ def project(tmp_path: Path):
     return record
 
 
+def _project_dir(project) -> Path:
+    return Path(project.source.relative_path).resolve().parent.parent
+
+
 def _package_text(package: Path) -> str:
     chunks: list[str] = []
     for path in package.rglob("*"):
@@ -158,6 +162,83 @@ def test_manifest_schema_is_versioned_and_stable(project, tmp_path) -> None:
     assert "seedream" in report
     assert "seedream-4.5" in report
     assert "莲纹书签" in report
+
+
+def test_export_copies_contained_mockup_png_as_ai_assisted(project, tmp_path) -> None:
+    project_dir = _project_dir(project)
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    mockup = write_image(mockups_dir / "bookmark.png", image_format="PNG", size=(12, 8))
+    outside = write_image(project_dir / "outside.png", image_format="PNG", size=(8, 8))
+    destination = tmp_path / "exports"
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(mockups=True, report=True),
+        destination,
+    )
+
+    copied = list((package / "mockups").rglob("*.png"))
+    assert len(copied) == 1
+    assert copied[0].read_bytes() == mockup.read_bytes()
+    assert copied[0].resolve().is_relative_to(destination.resolve())
+    assert not any(path.read_bytes() == outside.read_bytes() for path in package.rglob("*.png"))
+    for path in package.rglob("*"):
+        assert path.resolve().is_relative_to(destination.resolve())
+        assert ".." not in path.relative_to(destination).as_posix()
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    mockup_entries = [item for item in manifest["files"] if item["kind"] == "mockup"]
+    assert len(mockup_entries) == 1
+    assert mockup_entries[0]["ai_assisted"] is True
+    assert mockup_entries[0]["path"].startswith("mockups/")
+    assert ".." not in mockup_entries[0]["path"]
+
+
+def test_export_omits_mockups_when_not_selected(project, tmp_path) -> None:
+    project_dir = _project_dir(project)
+    mockups_dir = project_dir / "mockups"
+    mockups_dir.mkdir()
+    write_image(mockups_dir / "bookmark.png", image_format="PNG", size=(12, 8))
+    package = Exporter(project_dir).export(
+        project,
+        ExportSelection(patterns=True, mockups=False, report=True),
+        tmp_path,
+    )
+    assert not (package / "mockups").exists()
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    assert all(item["kind"] != "mockup" for item in manifest["files"])
+
+
+def test_export_redacts_secret_shaped_prompt_text(project, tmp_path) -> None:
+    project.generations[0].prompt = "莲纹 Bearer sk-secret-value api_key=sk-secret-value"
+    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+    blob = _package_text(package)
+    for marker in ("Bearer", "sk-secret-value", "api_key"):
+        assert marker not in blob
+    report = (package / "provenance.md").read_text(encoding="utf-8")
+    assert "seedream" in report
+    assert "seedream-4.5" in report
+    assert "2026-08-29T10:15:00Z" in report
+    assert "AI 辅助" in report
+
+
+def test_sanitized_pattern_basename_collisions_stay_unique(project, tmp_path) -> None:
+    project_dir = _project_dir(project)
+    patterns_dir = project_dir / "patterns"
+    first = write_image(patterns_dir / "ok.png", image_format="PNG", size=(10, 8))
+    second = write_image(patterns_dir / "ok..png", image_format="PNG", size=(12, 8))
+    project.artifacts.recomposition = [str(first.resolve()), str(second.resolve())]
+    package = Exporter().export(project, ExportSelection(patterns=True, report=True), tmp_path)
+
+    copied = sorted((package / "patterns").glob("*.png"))
+    assert len(copied) == 2
+    assert copied[0].name != copied[1].name
+    exported_bytes = {path.read_bytes() for path in copied}
+    assert first.read_bytes() in exported_bytes
+    assert second.read_bytes() in exported_bytes
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    paths = [item["path"] for item in manifest["files"] if item["kind"] == "pattern"]
+    assert len(paths) == 2
+    assert len(set(paths)) == 2
 
 
 def test_source_bytes_stay_identical_after_export(project, tmp_path) -> None:

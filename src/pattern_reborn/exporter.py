@@ -23,6 +23,15 @@ class ExportError(ValueError):
 
 
 _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_SECRET_MATERIAL = re.compile(
+    r"(?i)("
+    r"api[_-]?key\s*[=:]\s*\S+"
+    r"|bearer\s+\S+"
+    r"|authorization\s*[=:]\s*\S+"
+    r"|sk-[A-Za-z0-9._-]+"
+    r")"
+)
+_SECRET_TOKENS = re.compile(r"(?i)\b(api_key|bearer|authorization)\b")
 _PROVENANCE_ZH = {
     ProvenanceClass.VERIFIED_ICH_SOURCE: "已核验的传统来源",
     ProvenanceClass.TRADITIONAL_REFERENCE: "传统参考",
@@ -117,51 +126,89 @@ class Exporter:
                 )
             )
         if selection.extracted:
+            used: set[str] = set()
             for index, relative in enumerate(project.artifacts.extraction, start=1):
                 copied.append(
                     self._copy_asset(
                         relative,
-                        package / "extracted" / _unique_name(relative, f"extracted-{index}"),
+                        package / "extracted" / _unique_name(relative, f"extracted-{index}", used),
                         "extracted",
                         ai_assisted=False,
                         package=package,
                     )
                 )
         if selection.patterns:
+            used = set()
             for index, relative in enumerate(project.artifacts.recomposition, start=1):
                 copied.append(
                     self._copy_asset(
                         relative,
-                        package / "patterns" / _unique_name(relative, f"pattern-{index}"),
+                        package / "patterns" / _unique_name(relative, f"pattern-{index}", used),
                         "pattern",
                         ai_assisted=False,
                         package=package,
                     )
                 )
         if selection.generations:
+            used = set()
             for index, generation in enumerate(project.generations, start=1):
                 copied.append(
                     self._copy_asset(
                         generation.artifact_path,
-                        package / "generated" / _unique_name(generation.artifact_path, f"generated-{index}"),
+                        package / "generated" / _unique_name(generation.artifact_path, f"generated-{index}", used),
                         "generation",
                         ai_assisted=True,
                         package=package,
                     )
                 )
+        if selection.mockups:
+            copied.extend(self._copy_mockup_assets(project, package))
         if selection.svg:
+            used = set()
             for index, relative in enumerate(project.artifacts.recomposition, start=1):
                 if Path(relative).suffix.lower() != ".svg":
                     continue
                 copied.append(
                     self._copy_asset(
                         relative,
-                        package / "svg" / _unique_name(relative, f"pattern-{index}"),
+                        package / "svg" / _unique_name(relative, f"pattern-{index}", used),
                         "svg",
                         ai_assisted=False,
                         package=package,
                     )
                 )
+        return copied
+
+    def _copy_mockup_assets(self, project: ProjectRecord, package: Path) -> list[_CopiedFile]:
+        if self._project_root is None:
+            return []
+        mockups_root = (self._project_root / "mockups").resolve()
+        if not mockups_root.is_dir() or not mockups_root.is_relative_to(self._project_root):
+            return []
+        copied: list[_CopiedFile] = []
+        used: set[str] = set()
+        ai_assisted = bool(project.generations)
+        candidates = sorted(path for path in mockups_root.rglob("*") if path.is_file())
+        for index, source in enumerate(candidates, start=1):
+            try:
+                resolved = source.resolve()
+            except OSError:
+                continue
+            if not resolved.is_file():
+                continue
+            if not resolved.is_relative_to(mockups_root):
+                continue
+            dest_name = _unique_name(resolved.name, f"mockup-{index}", used)
+            relative_source = resolved.relative_to(self._project_root).as_posix()
+            copied.append(
+                self._copy_asset(
+                    relative_source,
+                    package / "mockups" / dest_name,
+                    "mockup",
+                    ai_assisted=ai_assisted,
+                    package=package,
+                )
+            )
         return copied
 
     def _copy_asset(
@@ -298,21 +345,37 @@ def _generation_entry(item: GenerationRecord) -> dict[str, object]:
     }
 
 
+def _redact_secrets(text: str) -> str:
+    redacted = _SECRET_MATERIAL.sub("[REDACTED]", text)
+    return _SECRET_TOKENS.sub("[REDACTED]", redacted)
+
+
 def _sanitize_filename(name: str, fallback: str = "export") -> str:
     collapsed = name.replace("..", "")
     cleaned = _UNSAFE_FILENAME.sub("_", collapsed).strip(" .")
+    cleaned = _redact_secrets(cleaned)
     if not cleaned or cleaned in {".", ".."}:
         return fallback
     return cleaned[:80]
 
 
-def _unique_name(source_ref: str, fallback: str) -> str:
+def _unique_name(source_ref: str, fallback: str, used: set[str]) -> str:
     original = Path(source_ref).name
     stem = _sanitize_filename(Path(original).stem, fallback)
     suffix = Path(original).suffix.lower()
     if suffix and _UNSAFE_FILENAME.search(suffix):
         suffix = ""
-    return f"{stem}{suffix}" if suffix else stem
+    candidate = f"{stem}{suffix}" if suffix else stem
+    if candidate not in used:
+        used.add(candidate)
+        return candidate
+    index = 2
+    while True:
+        name = f"{stem}-{index}{suffix}" if suffix else f"{stem}-{index}"
+        if name not in used:
+            used.add(name)
+            return name
+        index += 1
 
 
 def _iso(value: datetime) -> str:
@@ -320,7 +383,7 @@ def _iso(value: datetime) -> str:
 
 
 def _write_utf8(path: Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8", newline="\n")
+    path.write_text(_redact_secrets(text), encoding="utf-8", newline="\n")
 
 
 def _contained_path(path: Path, root: Path) -> Path:
