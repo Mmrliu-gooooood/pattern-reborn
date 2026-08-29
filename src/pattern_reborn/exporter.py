@@ -24,15 +24,9 @@ class ExportError(ValueError):
 
 _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _MOCKUP_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-_SECRET_MATERIAL = re.compile(
-    r"(?i)("
-    r"api[_-]?key\s*[=:]\s*\S+"
-    r"|authorization\s*[=:]\s*(?:bearer\s+)?\S+"
-    r"|bearer\s+\S+"
-    r"|sk-[A-Za-z0-9._-]+"
-    r")"
+_SECRET_SHAPED = re.compile(
+    r"(?i)(?:api[_-]?key|\bauthorization\b|\bbearer\b|\bbasic\s+\S+|sk-[A-Za-z0-9._-]+)"
 )
-_SECRET_TOKENS = re.compile(r"(?i)\b(api_key|bearer|authorization)\b")
 _PROVENANCE_ZH = {
     ProvenanceClass.VERIFIED_ICH_SOURCE: "已核验的传统来源",
     ProvenanceClass.TRADITIONAL_REFERENCE: "传统参考",
@@ -361,8 +355,9 @@ def _generation_entry(item: GenerationRecord) -> dict[str, object]:
 
 
 def _redact_secrets(text: str) -> str:
-    redacted = _SECRET_MATERIAL.sub("[REDACTED]", text)
-    return _SECRET_TOKENS.sub("[REDACTED]", redacted)
+    if _SECRET_SHAPED.search(text):
+        return "[REDACTED]"
+    return text
 
 
 def _redact_payload(value: object) -> object:

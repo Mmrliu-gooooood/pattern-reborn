@@ -317,9 +317,9 @@ def test_export_redacts_prompt_secrets_before_json_dumps(project, tmp_path) -> N
     raw = (package / "manifest.json").read_text(encoding="utf-8")
     manifest = json.loads(raw)
     prompt = manifest["generations"][0]["prompt"]
+    assert prompt == "[REDACTED]"
     assert "authorization" not in prompt.lower()
     assert "abc" not in prompt
-    assert "keep-me" in prompt
     assert manifest["schema_version"] == 1
     assert manifest["generations"][0]["id"] == project.generations[0].id
     assert "authorization" not in raw.lower()
@@ -332,7 +332,7 @@ def test_export_redacts_authorization_bearer_token(project, tmp_path) -> None:
         project, ExportSelection(patterns=True, report=True), tmp_path
     )
     manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
-    assert "keep-me" in manifest["generations"][0]["prompt"]
+    assert manifest["generations"][0]["prompt"] == "[REDACTED]"
     for path in package.rglob("*"):
         if not path.is_file():
             continue
@@ -341,6 +341,27 @@ def test_export_redacts_authorization_bearer_token(project, tmp_path) -> None:
         except UnicodeDecodeError:
             continue
         assert "secret-value" not in text
+
+
+def test_export_redacts_entire_basic_credential_string(project, tmp_path) -> None:
+    secret = "Authorization: Basic abc123"
+    project.name = secret
+    project.generations[0].prompt = secret
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, report=True), tmp_path
+    )
+    assert "abc123" not in package.name
+    for path in package.rglob("*"):
+        assert "abc123" not in path.name
+        assert "abc123" not in path.relative_to(package).as_posix()
+    blob = _package_text(package)
+    assert "abc123" not in blob
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    dumped = json.dumps(manifest)
+    assert "abc123" not in dumped
+    assert manifest["schema_version"] == 1
+    assert manifest["project_name"] == "[REDACTED]"
+    assert manifest["generations"][0]["prompt"] == "[REDACTED]"
 
 
 def test_export_redacts_project_name_and_source_filename_secrets(project, tmp_path) -> None:
