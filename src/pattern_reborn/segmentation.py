@@ -15,6 +15,7 @@ from pattern_reborn.domain import ProfileId
 
 
 ALGORITHM_VERSION = "opencv-baseline-1.0"
+MOBILE_SAM_ALGORITHM_VERSION = "mobile-sam-1.0"
 
 
 class SegmentationError(ValueError):
@@ -232,6 +233,58 @@ class OpenCvSegmenter:
         )
 
 
+class MobileSamSegmenter:
+    """Optional MobileSAM adapter. The predictor is injected; Torch is never imported here."""
+
+    def __init__(self, predictor: object) -> None:
+        self._predictor = predictor
+
+    def segment(
+        self, image: np.ndarray, profile: ProfileId, hints: SegmentHints
+    ) -> SegmentResult:
+        rgb = _require_rgb_uint8(image)
+        if not isinstance(profile, ProfileId):
+            raise SegmentationError("提取配置无效。")
+        if not isinstance(hints, SegmentHints):
+            raise SegmentationError("区域提示无效。")
+
+        set_image = getattr(self._predictor, "set_image", None)
+        predict = getattr(self._predictor, "predict", None)
+        if not callable(set_image) or not callable(predict):
+            raise SegmentationError("MobileSAM 预测器无效。")
+
+        set_image(rgb.copy())
+        predict_kwargs: dict[str, object] = {"multimask_output": False}
+        if hints.box is not None:
+            predict_kwargs["box"] = np.asarray(hints.box, dtype=np.float32)
+        if hints.points:
+            predict_kwargs["point_coords"] = np.asarray(
+                [[point.x, point.y] for point in hints.points], dtype=np.float32
+            )
+            predict_kwargs["point_labels"] = np.asarray(
+                [1 if point.keep else 0 for point in hints.points], dtype=np.int32
+            )
+
+        masks, _scores, _logits = predict(**predict_kwargs)
+        final_mask = _mask_from_predictor(masks, rgb.shape[:2])
+        warnings: list[str] = []
+        if not np.any(final_mask):
+            warnings.append("no_foreground_detected")
+
+        return SegmentResult(
+            mask=final_mask.copy(),
+            rgba=extract_rgba(rgb, final_mask),
+            profile=profile,
+            parameters={
+                "profile_algorithm": "mobile-sam-prompted",
+                "multimask_output": False,
+            },
+            hints=hints,
+            algorithm_version=MOBILE_SAM_ALGORITHM_VERSION,
+            warnings=tuple(warnings),
+        )
+
+
 def apply_mask_strokes(mask: np.ndarray, strokes: Sequence[MaskStroke]) -> np.ndarray:
     """Replay ordered keep/remove strokes on a copied binary mask."""
     edited = _require_binary_mask(mask).copy()
@@ -390,6 +443,16 @@ def _profile_algorithm(profile: ProfileId) -> str:
         ProfileId.TEXTILE: "bilateral-otsu-adaptive",
         ProfileId.ARTIFACT_PHOTO: "grabcut-rectangle",
     }[profile]
+
+
+def _mask_from_predictor(masks: object, shape: tuple[int, int]) -> np.ndarray:
+    array = np.asarray(masks)
+    if array.ndim == 3:
+        array = array[0]
+    if array.shape != shape:
+        raise SegmentationError("蒙版尺寸必须与图像一致。")
+    binary = np.where(array > 0, 255, 0).astype(np.uint8)
+    return np.ascontiguousarray(binary)
 
 
 def _require_rgb_uint8(image: object) -> np.ndarray:
