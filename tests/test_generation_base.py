@@ -128,12 +128,25 @@ def test_generation_failure_keeps_short_safe_provider_code() -> None:
     assert "429" in str(failure)
 
 
-def test_generation_failure_keeps_dotted_provider_error_code() -> None:
+def test_generation_failure_redacts_pascal_case_provider_error_code() -> None:
     failure = GenerationFailure(
         FailureKind.MALFORMED,
         "生成请求参数无效，请调整后重试。",
         provider_code="InvalidParameter",
     )
-    assert failure.provider_code == "InvalidParameter"
-    assert "InvalidParameter" in str(failure)
+    rendered = f"{failure}{failure.provider_code}{failure!r}"
+    assert failure.provider_code == "[REDACTED]"
+    assert "InvalidParameter" not in rendered
     assert failure.user_message_zh == "生成请求参数无效，请调整后重试。"
+
+
+def test_generation_failure_redacts_secret_shaped_alphanumeric_token() -> None:
+    failure = GenerationFailure(
+        FailureKind.AUTH,
+        "身份验证失败，请检查访问凭证。",
+        provider_code="SecretToken123",
+    )
+    rendered = f"{failure}{failure.provider_code}{failure!r}"
+    assert failure.provider_code == "[REDACTED]"
+    assert "SecretToken123" not in rendered
+    assert failure.user_message_zh == "身份验证失败，请检查访问凭证。"

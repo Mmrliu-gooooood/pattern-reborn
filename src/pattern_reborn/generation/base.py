@@ -45,21 +45,18 @@ class FailureKind(str, Enum):
 
 
 _HTTP_STATUS_CODE = re.compile(r"^[1-5]\d{2}$")
-_DOTTED_ERROR_CODE = re.compile(
-    r"^[A-Z][A-Za-z0-9]{0,31}(?:\.[A-Z][A-Za-z0-9]{0,31}){0,4}$"
-)
 _SECRET_SHAPED = re.compile(
     r"(?i)(?:api[_-]?key|\bauthorization\b|\bbearer\b|\bbasic\s+\S+|sk-[A-Za-z0-9._-]+)"
 )
 
 
 def redact_provider_code(value: str | None) -> str | None:
-    """Keep recognized HTTP/status and dotted error codes; redact tokens and dumps."""
+    """Keep HTTP status codes only (1xx–5xx); redact all other tokens and dumps."""
     if value is None or value == "":
         return None
     if len(value) > 32 or _SECRET_SHAPED.search(value):
         return "[REDACTED]"
-    if _HTTP_STATUS_CODE.fullmatch(value) or _DOTTED_ERROR_CODE.fullmatch(value):
+    if _HTTP_STATUS_CODE.fullmatch(value):
         return value
     return "[REDACTED]"
 
