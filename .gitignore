@@ -1,0 +1,30 @@
+# Project-local Python environment and caches
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets: never commit API credentials
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local models and generated/user data
+models/
+workspace/
+outputs/
+
+# Packaging and editor artifacts
+build/
+dist/
+*.egg-info/
+.idea/
+.vscode/
+
+# Superpowers visual brainstorming artifacts
+.superpowers/
+
