@@ -8,8 +8,9 @@ from pathlib import Path
 import streamlit as st
 
 from pattern_reborn.capabilities import Capabilities
+from pattern_reborn.domain import CategoryId, ProvenanceClass
 from pattern_reborn.knowledge import KnowledgeCatalog
-from pattern_reborn.workflow import PatternRebornService
+from pattern_reborn.workflow import CreateProjectCommand, PatternRebornService, WorkflowError
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,10 @@ class DemoCase:
     id: str
     title_zh: str
     source_path: Path
+    creator: str = ""
+    license: str = ""
+    category: CategoryId | None = None
+    provenance: ProvenanceClass | None = None
 
 
 def load_validated_demos(demo_root: Path) -> list[DemoCase]:
@@ -51,8 +56,60 @@ def load_validated_demos(demo_root: Path) -> list[DemoCase]:
             continue
         if not source_path.is_relative_to(root) or not source_path.is_file():
             continue
-        validated.append(DemoCase(id=case_id, title_zh=title, source_path=source_path))
+        creator, license_name, category, provenance = _demo_rights(source_path.parent, item)
+        validated.append(
+            DemoCase(
+                id=case_id,
+                title_zh=title,
+                source_path=source_path,
+                creator=creator,
+                license=license_name,
+                category=category,
+                provenance=provenance,
+            )
+        )
     return validated
+
+
+def _demo_rights(
+    case_dir: Path, manifest_item: dict
+) -> tuple[str, str, CategoryId | None, ProvenanceClass | None]:
+    creator = str(manifest_item.get("creator") or manifest_item.get("creator_institution") or "").strip()
+    license_name = str(manifest_item.get("license") or "").strip()
+    category = _optional_category(manifest_item.get("category"))
+    provenance = _optional_provenance(manifest_item.get("provenance"))
+    meta_path = case_dir / "metadata.json"
+    if not meta_path.is_file():
+        return creator, license_name, category, provenance
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return creator, license_name, category, provenance
+    if not isinstance(meta, dict):
+        return creator, license_name, category, provenance
+    creator = str(meta.get("creator_institution") or creator).strip()
+    license_name = str(meta.get("license") or license_name).strip()
+    category = _optional_category(meta.get("category")) or category
+    provenance = _optional_provenance(meta.get("provenance")) or provenance
+    return creator, license_name, category, provenance
+
+
+def _optional_category(value: object) -> CategoryId | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return CategoryId(value.strip())
+    except ValueError:
+        return None
+
+
+def _optional_provenance(value: object) -> ProvenanceClass | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return ProvenanceClass(value.strip())
+    except ValueError:
+        return None
 
 
 def render_home(
@@ -68,6 +125,8 @@ def render_home(
         st.session_state.pop("project_id", None)
         st.session_state.pop("selected_category", None)
         st.session_state.pop("studio_step", None)
+        st.session_state.pop("byok_secret", None)
+        st.session_state.pop("gen_byok_input", None)
         st.rerun()
 
     st.markdown("## 最近项目")
@@ -96,7 +155,30 @@ def render_home(
         for index, demo in enumerate(demos):
             with demo_columns[index % len(demo_columns)]:
                 st.markdown(f"**{demo.title_zh}**")
+                credit = " · ".join(part for part in (demo.creator, demo.license) if part)
+                if credit:
+                    st.caption(credit)
                 st.image(str(demo.source_path), use_container_width=True)
+                if (
+                    demo.category is not None
+                    and demo.provenance is not None
+                    and st.button("打开示例", key=f"demo-open-{demo.id}")
+                ):
+                    try:
+                        created = service.create_project(
+                            CreateProjectCommand(
+                                name=demo.title_zh,
+                                source=demo.source_path,
+                                category=demo.category,
+                                provenance=demo.provenance,
+                            )
+                        )
+                        st.session_state["route"] = "studio"
+                        st.session_state["project_id"] = created.id
+                        st.session_state.pop("studio_step", None)
+                        st.rerun()
+                    except (WorkflowError, OSError) as error:
+                        st.error(str(error))
 
     link_columns = st.columns(2)
     with link_columns[0]:

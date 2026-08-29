@@ -110,6 +110,51 @@ def test_home_shows_at_most_three_recent_projects(
     assert set(recent_buttons) == {"项目乙", "项目丙", "项目丁"}
 
 
+def test_home_demo_cards_show_creator_and_license(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    demo_root = tmp_path / "demo"
+    case = demo_root / "lotus"
+    case.mkdir(parents=True)
+    Image.new("RGB", (8, 8), (20, 80, 40)).save(case / "source.png")
+    (case / "metadata.json").write_text(
+        json.dumps(
+            {
+                "title": "莲纹剪纸演示",
+                "creator_institution": "Sean Chiu",
+                "license": "CC BY-SA 4.0",
+                "category": "paper_cutting",
+                "provenance": "traditional_reference",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (demo_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "lotus-paper-cut",
+                        "title_zh": "莲纹剪纸演示",
+                        "source": "lotus/source.png",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PATTERN_REBORN_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("PATTERN_REBORN_DEMO_ROOT", str(demo_root))
+    app = AppTest.from_file(APP_PATH, default_timeout=15)
+    app.run()
+    assert not app.exception
+    text = _all_text(app)
+    assert "Sean Chiu" in text
+    assert "CC BY-SA" in text
+
+
 def test_home_hides_demo_cards_when_assets_are_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

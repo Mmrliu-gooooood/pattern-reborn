@@ -297,6 +297,17 @@ def _write_provenance(project: ProjectRecord, copied: list[_CopiedFile], package
     ]
     current_generations = _current_generations(project)
     has_ai = bool(current_generations) or any(item.ai_assisted for item in copied)
+    lines.extend(["## 第三方引擎", "", "- OpenCV：本地提取与分析。"])
+    has_svg = any(Path(path).suffix.lower() == ".svg" for path in project.artifacts.recomposition)
+    if has_svg:
+        lines.append("- VTracer：SVG 矢量化。")
+    if has_ai:
+        providers = sorted({_redact_secrets(item.provider) for item in current_generations})
+        if providers:
+            lines.append(f"- 生成提供方：{', '.join(providers)}。")
+        else:
+            lines.append("- 生成提供方：AI-assisted。")
+    lines.append("")
     if has_ai:
         lines.extend(
             [

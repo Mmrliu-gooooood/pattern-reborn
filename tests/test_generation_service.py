@@ -179,6 +179,57 @@ def test_platform_mode_uses_resolver_without_byok(
     assert qwen.calls == []
 
 
+def test_generate_rejects_qwen_seedream_2k_before_adapter(reference_png: Path) -> None:
+    from pattern_reborn.config import load_provider_config
+    from pattern_reborn.generation.service import GenerationService
+
+    config = load_provider_config(Path(__file__).resolve().parents[1] / "config" / "providers.json")
+    qwen = RecordingAdapter(ProviderId.QWEN)
+    seedream = RecordingAdapter(ProviderId.SEEDREAM)
+    service = GenerationService(
+        {ProviderId.SEEDREAM: seedream, ProviderId.QWEN: qwen},
+        RecordingResolver(),
+        config=config,
+    )
+    request = make_generation_request(
+        reference_png,
+        provider=ProviderId.QWEN,
+        model="qwen-image-3.0-pro",
+        size="2K",
+    )
+    with pytest.raises(GenerationFailure) as captured:
+        service.generate(request, CredentialMode.PLATFORM)
+    assert captured.value.kind is FailureKind.MALFORMED
+    assert qwen.calls == []
+    assert seedream.calls == []
+
+
+def test_generate_appends_structure_color_and_target_to_prompt(reference_png: Path) -> None:
+    from pattern_reborn.generation.service import GenerationService
+
+    seedream = RecordingAdapter(ProviderId.SEEDREAM)
+    service = GenerationService(
+        {ProviderId.SEEDREAM: seedream, ProviderId.QWEN: RecordingAdapter(ProviderId.QWEN)},
+        RecordingResolver(),
+    )
+    request = make_generation_request(reference_png)
+    service.generate(request, CredentialMode.PLATFORM)
+    sent = seedream.calls[0].prompt
+    assert "high" in sent.lower() or "高" in sent
+    assert "bookmark" in sent.lower() or "书签" in sent
+    assert "qinghua-blue" in sent or "色彩" in sent
+
+
+def test_build_generation_service_reuses_httpx_client(tmp_path: Path) -> None:
+    from pattern_reborn.config import load_provider_config
+    from pattern_reborn.generation.service import build_generation_service
+
+    config = load_provider_config(Path(__file__).resolve().parents[1] / "config" / "providers.json")
+    first = build_generation_service(config=config, output_dir=tmp_path / "out-a")
+    second = build_generation_service(config=config, output_dir=tmp_path / "out-b")
+    assert first._adapters[ProviderId.SEEDREAM]._client is second._adapters[ProviderId.SEEDREAM]._client
+
+
 def test_missing_platform_credential_does_not_call_adapter(
     seedream_request,
 ) -> None:

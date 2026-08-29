@@ -105,6 +105,9 @@ def render_studio(
     if st.button("返回首页"):
         st.session_state["route"] = "home"
         st.session_state.pop("project_id", None)
+        st.session_state.pop("studio_step", None)
+        st.session_state.pop("byok_secret", None)
+        st.session_state.pop("gen_byok_input", None)
         st.rerun()
     st.markdown("创作工坊")
     step = STEP_BY_LABEL.get(st.session_state.get("studio_step", STEP_LABELS[0]), StepId.UPLOAD)
@@ -258,7 +261,7 @@ def _render_extraction(
         default_profile = knowledge.profile_for(project.category)
         profile_index = list(profile_names.values()).index(default_profile.id)
         profile_name = st.selectbox("处理档案", list(profile_names), index=profile_index)
-        st.caption("默认沿用品类档案；框选与提示点可辅助 OpenCV 提取。")
+        st.caption("当前提取使用 OpenCV 基线；未调用 MobileSAM。框选与提示点可辅助提取。")
     if canvas is not None:
         st.caption("画布工具：点选、框选、保留笔刷、删除笔刷。")
     if st.button("添加笔触") and stroke_coords.strip():
@@ -272,7 +275,12 @@ def _render_extraction(
         except (ValueError, WorkflowError) as error:
             st.error(str(error))
     box = (int(left), int(top), int(right), int(bottom)) if right > left and bottom > top else None
-    points = (PromptPoint(x=int(point_x), y=int(point_y), keep=bool(keep_point)),)
+    points = _manual_prompt_points(point_x, point_y, keep_point)
+    canvas_hints, canvas_strokes = hints_from_canvas_objects(st.session_state.get("canvas_objects"))
+    if canvas_hints.box is not None:
+        box = canvas_hints.box
+    points = tuple(canvas_hints.points) + points
+    strokes = canvas_strokes + list(st.session_state.get("mask_strokes") or [])
     if st.button("提取", type="primary"):
         try:
             result = service.extract(
@@ -280,21 +288,140 @@ def _render_extraction(
                 ExtractCommand(
                     profile=profile_names[profile_name],
                     hints=SegmentHints(box=box, points=points),
-                    strokes=list(st.session_state.get("mask_strokes") or []),
+                    strokes=strokes,
                 ),
             )
             st.image(str(result.path), caption="提取结果")
             st.success("提取完成，请确认后进入下一步。")
+            st.rerun()
         except (WorkflowError, ValueError) as error:
             st.error(str(error))
     pending = project.processing_parameters.get("pending_extraction")
-    if isinstance(pending, dict) and pending.get("artifact_id") and st.button("确认提取"):
-        try:
-            service.confirm_extraction(project.id, str(pending["artifact_id"]))
-            st.success("已确认提取结果。")
-            st.rerun()
-        except WorkflowError as error:
-            st.error(str(error))
+    if isinstance(pending, dict) and pending.get("artifact_id"):
+        pending_path = project_dir / str(pending["artifact_id"])
+        if pending_path.is_file():
+            st.image(str(pending_path), caption="提取结果")
+        if st.button("确认提取"):
+            try:
+                service.confirm_extraction(project.id, str(pending["artifact_id"]))
+                st.success("已确认提取结果。")
+                st.rerun()
+            except WorkflowError as error:
+                st.error(str(error))
+
+
+def hints_from_canvas_objects(raw: object) -> tuple[SegmentHints, list[MaskStroke]]:
+    objects = _canvas_object_list(raw)
+    box: tuple[int, int, int, int] | None = None
+    points: list[PromptPoint] = []
+    strokes: list[MaskStroke] = []
+    for item in objects:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or item.get("className") or "").lower()
+        attrs = item.get("attrs") if isinstance(item.get("attrs"), dict) else item
+        if not isinstance(attrs, dict):
+            continue
+        if kind in {"rect", "rectangle"}:
+            parsed = _rect_box(attrs)
+            if parsed is not None:
+                box = parsed
+        elif kind in {"circle", "point", "dot"}:
+            parsed_point = _point_xy(attrs)
+            if parsed_point is not None:
+                points.append(PromptPoint(x=parsed_point[0], y=parsed_point[1], keep=True))
+        elif kind in {"line", "freedraw"}:
+            stroke = _stroke_from_line(attrs)
+            if stroke is not None:
+                strokes.append(stroke)
+    return SegmentHints(box=box, points=tuple(points)), strokes
+
+
+def _canvas_object_list(raw: object) -> list:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    payload = raw
+    if not isinstance(payload, dict):
+        json_payload = getattr(raw, "json", None)
+        objects = getattr(raw, "objects", None)
+        if isinstance(json_payload, dict):
+            payload = json_payload
+        elif isinstance(objects, list):
+            return list(objects)
+        else:
+            return []
+    nested = payload.get("json")
+    if isinstance(nested, dict) and isinstance(nested.get("objects"), list):
+        return list(nested["objects"])
+    objects = payload.get("objects")
+    return list(objects) if isinstance(objects, list) else []
+
+
+def _rect_box(attrs: dict) -> tuple[int, int, int, int] | None:
+    x = attrs.get("x", attrs.get("left"))
+    y = attrs.get("y", attrs.get("top"))
+    width = attrs.get("width")
+    height = attrs.get("height")
+    try:
+        left = int(round(float(x)))
+        top = int(round(float(y)))
+        right = left + int(round(float(width)))
+        bottom = top + int(round(float(height)))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if right <= left or bottom <= top:
+        return None
+    return (left, top, right, bottom)
+
+
+def _point_xy(attrs: dict) -> tuple[int, int] | None:
+    x = attrs.get("x", attrs.get("left"))
+    y = attrs.get("y", attrs.get("top"))
+    try:
+        return int(round(float(x))), int(round(float(y)))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _stroke_from_line(attrs: dict) -> MaskStroke | None:
+    raw_points = attrs.get("points")
+    parsed: list[tuple[int, int]] = []
+    if isinstance(raw_points, (list, tuple)) and raw_points:
+        if isinstance(raw_points[0], (list, tuple)) and len(raw_points[0]) == 2:
+            for item in raw_points:
+                try:
+                    parsed.append((int(round(float(item[0]))), int(round(float(item[1])))))
+                except (TypeError, ValueError, OverflowError, IndexError):
+                    return None
+        elif all(not isinstance(item, (list, tuple)) for item in raw_points):
+            numbers = list(raw_points)
+            for index in range(0, len(numbers) - 1, 2):
+                try:
+                    parsed.append(
+                        (int(round(float(numbers[index]))), int(round(float(numbers[index + 1]))))
+                    )
+                except (TypeError, ValueError, OverflowError, IndexError):
+                    return None
+    if len(parsed) < 1:
+        return None
+    width = attrs.get("strokeWidth", attrs.get("width", 3))
+    try:
+        stroke_width = max(1, int(round(float(width))))
+    except (TypeError, ValueError, OverflowError):
+        stroke_width = 3
+    mode = MaskEditMode.REMOVE if str(attrs.get("mode", "")).lower() in {"remove", "erase", "删除"} else MaskEditMode.KEEP
+    return MaskStroke(mode=mode, points=parsed, width=stroke_width)
+
+
+def _manual_prompt_points(point_x: object, point_y: object, keep_point: object) -> tuple[PromptPoint, ...]:
+    x = int(point_x)
+    y = int(point_y)
+    keep = bool(keep_point)
+    if x == 0 and y == 0 and keep:
+        return ()
+    return (PromptPoint(x=x, y=y, keep=keep),)
 
 
 def _optional_canvas(capabilities: Capabilities, source_path: Path):
@@ -399,9 +526,8 @@ def _render_generation(
             st.caption("生成需要已确认的提取参考图。")
         return
     _restore_unsaved()
-    offline = capabilities.offline
-    if offline:
-        st.info("当前离线，无法调用生图接口。")
+    if capabilities.offline:
+        st.info("当前离线探测未通过，仍可尝试生成；若接口不可达将在确认后提示。")
     provider_label = st.radio(
         "生图模型",
         list(PROVIDER_LABELS),
@@ -420,7 +546,7 @@ def _render_generation(
         st.session_state["gen_size"] = "1024x1024" if "1024x1024" in size_options else size_options[0]
     current_size = st.session_state.get("gen_size")
     if isinstance(current_size, str) and current_size not in size_options:
-        size_options = [current_size, *size_options]
+        st.session_state["gen_size"] = size_options[0]
     st.selectbox("输出尺寸", size_options, key="gen_size")
     st.selectbox("结构保留", list(STRUCTURE_LABELS), key="gen_structure")
     st.selectbox("目标应用", list(TARGET_LABELS), key="gen_target")
@@ -434,7 +560,7 @@ def _render_generation(
         extracted_path = service.repository.project_dir(project.id) / extracted_id
         if extracted_path.is_file():
             st.image(str(extracted_path), caption="参考图")
-    if st.button("生成", disabled=offline):
+    if st.button("生成"):
         st.session_state["generation_confirm_pending"] = True
     if st.session_state.get("generation_confirm_pending"):
         st.markdown("请确认本次生成（可能产生费用）：")
@@ -442,7 +568,7 @@ def _render_generation(
         st.markdown(f"模型：{settings.default_model}")
         st.markdown(f"尺寸：{st.session_state.get('gen_size')}")
         st.markdown("数量：1")
-        if st.button("确认生成", disabled=offline, type="primary"):
+        if st.button("确认生成", type="primary"):
             _dispatch_generation(
                 service,
                 project.id,

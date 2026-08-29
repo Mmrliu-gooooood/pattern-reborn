@@ -199,6 +199,12 @@ class PatternRebornService:
             if mask_path.is_file():
                 paths.append(mask_id)
         self.repository.confirm(project.id, StepId.EXTRACTION, paths)
+        project = self.repository.load(project_id)
+        parameters = dict(project.processing_parameters)
+        parameters.pop("pending_extraction", None)
+        project.processing_parameters = parameters
+        project.updated_at = datetime.now(UTC)
+        self.repository.save(project)
         return self.save_navigation_state(project.id, StepId.EXTRACTION)
 
     def analyze(self, project_id: str) -> AnalysisReport:

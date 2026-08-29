@@ -73,6 +73,15 @@ def _package_text(package: Path) -> str:
     return "\n".join(chunks)
 
 
+def test_provenance_names_third_party_engines(project, tmp_path) -> None:
+    package = _exporter(tmp_path, project).export(
+        project, ExportSelection(patterns=True, generations=True, report=True), tmp_path
+    )
+    report = (package / "provenance.md").read_text(encoding="utf-8")
+    assert "OpenCV" in report or "第三方" in report
+    assert "seedream" in report.lower() or "提供" in report
+
+
 def test_export_contains_manifest_report_and_selected_assets(project, tmp_path) -> None:
     project_dir = _project_dir(tmp_path, project)
     package = _exporter(tmp_path, project).export(

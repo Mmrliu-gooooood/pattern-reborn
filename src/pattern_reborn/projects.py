@@ -145,7 +145,10 @@ class ProjectRepository:
                 continue
             if not self._PROJECT_ID_PATTERN.fullmatch(path.name):
                 continue
-            projects.append(self.load(path.name))
+            try:
+                projects.append(self.load(path.name))
+            except ProjectRepositoryError:
+                continue
         projects.sort(key=lambda project: project.updated_at, reverse=True)
         return projects[:limit]
 

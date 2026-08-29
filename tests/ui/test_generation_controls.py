@@ -127,12 +127,64 @@ def test_switching_provider_keeps_neutral_generation_fields(studio_at_generation
     )
 
 
-def test_generation_is_disabled_while_offline(studio_at_generation, monkeypatch) -> None:
+def test_generation_stays_enabled_when_cloudflare_probe_fails(
+    studio_at_generation, monkeypatch
+) -> None:
     monkeypatch.setattr("pattern_reborn.capabilities.probe_online", lambda: False)
     studio_at_generation.run()
     assert not studio_at_generation.exception
     generate = next(button for button in studio_at_generation.button if button.label == "生成")
-    assert widget_disabled(generate)
+    assert not widget_disabled(generate)
+    prompt = next(widget for widget in studio_at_generation.text_area if widget.label == "提示词")
+    prompt.set_value("离线探测失败仍应可生成").run()
+    generate = next(button for button in studio_at_generation.button if button.label == "生成")
+    generate.click().run()
+    assert not studio_at_generation.exception
+    confirm = next(button for button in studio_at_generation.button if button.label == "确认生成")
+    assert not widget_disabled(confirm)
+
+
+def test_switching_to_qwen_resets_unsupported_seedream_2k(studio_at_generation) -> None:
+    studio_at_generation.run()
+    size = next(widget for widget in studio_at_generation.selectbox if widget.label == "输出尺寸")
+    size.set_value("2K").run()
+    _provider_radio(studio_at_generation).set_value("Qwen Image 3.0 Pro").run()
+    assert not studio_at_generation.exception
+    size = next(widget for widget in studio_at_generation.selectbox if widget.label == "输出尺寸")
+    option_labels = [getattr(item, "label", item) for item in size.options]
+    assert size.value != "2K"
+    assert "2K" not in option_labels
+    assert size.value == option_labels[0]
+
+
+def test_generation_prompt_sent_to_adapter_includes_constraints(
+    studio_at_generation, fake_adapters
+) -> None:
+    from pattern_reborn.generation.base import ProviderId
+
+    studio_at_generation.run()
+    prompt = next(widget for widget in studio_at_generation.text_area if widget.label == "提示词")
+    prompt.set_value("保持莲纹骨架").run()
+    next(widget for widget in studio_at_generation.selectbox if widget.label == "结构保留").set_value(
+        "高"
+    ).run()
+    next(widget for widget in studio_at_generation.selectbox if widget.label == "目标应用").set_value(
+        "书签"
+    ).run()
+    colors = next(widget for widget in studio_at_generation.multiselect if widget.label == "传统色彩")
+    first_color = colors.options[0]
+    colors.set_value([first_color]).run()
+    next(button for button in studio_at_generation.button if button.label == "生成").click().run()
+    next(button for button in studio_at_generation.button if button.label == "确认生成").click().run()
+    assert not studio_at_generation.exception
+    assert fake_adapters[ProviderId.SEEDREAM].calls
+    sent = fake_adapters[ProviderId.SEEDREAM].calls[-1].prompt
+    assert "高" in sent or "high" in sent.lower()
+    assert "书签" in sent or "bookmark" in sent.lower()
+    color_label = str(getattr(first_color, "label", first_color))
+    assert color_label in sent or any(
+        token in sent for token in (color_label, "色彩", "color")
+    )
 
 
 def test_generated_results_show_visible_ai_labels(

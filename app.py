@@ -32,17 +32,37 @@ def _demo_root() -> Path:
     return Path(override) if override else REPO_ROOT / "data" / "demo"
 
 
+def _use_resource_cache() -> bool:
+    return not os.environ.get("PATTERN_REBORN_WORKSPACE")
+
+
+@st.cache_resource
+def _cached_capabilities():
+    return detect_capabilities()
+
+
+@st.cache_resource
+def _cached_generation_bundle(output_dir: str):
+    provider_config = load_provider_config(REPO_ROOT / "config" / "providers.json")
+    generation = build_generation_service(
+        config=provider_config,
+        output_dir=Path(output_dir),
+    )
+    return generation, provider_config
+
+
 def build_runtime() -> tuple[PatternRebornService, KnowledgeCatalog, ProviderConfig]:
     paths = RuntimePaths.from_root(REPO_ROOT)
     for directory in paths.mutable_directories():
         directory.mkdir(parents=True, exist_ok=True)
     repository = ProjectRepository(_workspace_path(paths))
     knowledge = KnowledgeCatalog.load(REPO_ROOT / "data" / "knowledge")
-    provider_config = load_provider_config(REPO_ROOT / "config" / "providers.json")
-    generation = build_generation_service(
-        config=provider_config,
-        output_dir=paths.outputs / "generation-cache",
-    )
+    output_dir = paths.outputs / "generation-cache"
+    if _use_resource_cache():
+        generation, provider_config = _cached_generation_bundle(str(output_dir))
+    else:
+        provider_config = load_provider_config(REPO_ROOT / "config" / "providers.json")
+        generation = build_generation_service(config=provider_config, output_dir=output_dir)
     service = PatternRebornService(
         repository,
         knowledge=knowledge,
@@ -60,7 +80,7 @@ def main() -> None:
     )
     render_shell_chrome()
     service, knowledge, provider_config = build_runtime()
-    capabilities = detect_capabilities()
+    capabilities = _cached_capabilities() if _use_resource_cache() else detect_capabilities()
     if st.session_state.get("route") == "studio":
         render_studio(service, knowledge, capabilities, provider_config)
         return

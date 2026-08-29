@@ -78,6 +78,17 @@ def test_navigation_state_persists_on_project_record(app_service, source_fixture
     assert reloaded.processing_parameters["draft"]["unsaved_note"] == "待确认"
 
 
+def test_confirm_extraction_clears_pending_extraction(app_service, source_fixture: Path) -> None:
+    project = _create(app_service, source_fixture)
+    extraction = app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
+    pending = app_service.load_project(project.id).processing_parameters.get("pending_extraction")
+    assert isinstance(pending, dict) and pending.get("artifact_id") == extraction.artifact_id
+    confirmed = app_service.confirm_extraction(project.id, extraction.artifact_id)
+    assert confirmed.processing_parameters.get("pending_extraction") in (None, {})
+    with pytest.raises(WorkflowError, match="提取"):
+        app_service.confirm_extraction(project.id, extraction.artifact_id)
+
+
 def test_confirm_rejects_missing_extraction(app_service, source_fixture: Path) -> None:
     project = _create(app_service, source_fixture)
     with pytest.raises(WorkflowError, match="提取"):

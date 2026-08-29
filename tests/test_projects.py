@@ -83,6 +83,21 @@ def test_confirm_rejects_artifact_path_that_escapes_project_directory(tmp_path: 
     assert repository.load(project.id).confirmed_steps == []
 
 
+def test_list_recent_skips_corrupt_and_unsupported_project_dirs(tmp_path: Path) -> None:
+    repository, good = make_project(tmp_path)
+    corrupt_dir = repository.workspace / "project-corruptx"
+    corrupt_dir.mkdir()
+    (corrupt_dir / "project.json").write_text("{无效 JSON", encoding="utf-8")
+    unsupported_dir = repository.workspace / "project-unsupport"
+    unsupported_dir.mkdir()
+    (unsupported_dir / "project.json").write_text(
+        '{"schema_version":2,"name":"旧版"}',
+        encoding="utf-8",
+    )
+    recent = repository.list_recent()
+    assert [project.id for project in recent] == [good.id]
+
+
 def test_list_recent_returns_projects_newest_first(tmp_path: Path) -> None:
     repository, first = make_project(tmp_path)
     second_source = tmp_path / "second.png"
