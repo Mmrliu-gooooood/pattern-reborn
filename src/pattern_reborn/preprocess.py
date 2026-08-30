@@ -7,6 +7,13 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+from pattern_reborn.limits import (
+    MAX_INTERMEDIATE_EDGE,
+    MAX_INTERMEDIATE_PIXELS,
+    ImageLimitError,
+    require_bounded_size,
+)
+
 
 class PreprocessError(ValueError):
     """预处理参数或图像数组不符合安全约束。"""
@@ -22,7 +29,7 @@ class PreprocessSettings:
     clahe_tile_grid_size: tuple[int, int] = (8, 8)
 
     def __post_init__(self) -> None:
-        strength = _finite_number(self.white_balance_strength, "白平衡")
+        strength = _strict_finite_number(self.white_balance_strength, "增强白平衡")
         if not 0.0 <= strength <= 1.0:
             raise PreprocessError("增强白平衡强度必须在 0 到 1 之间。")
         if (
@@ -31,14 +38,18 @@ class PreprocessSettings:
             or not 0 <= self.denoise_strength <= 10
         ):
             raise PreprocessError("增强降噪强度必须是 0 到 10 的整数。")
-        clip_limit = _finite_number(self.clahe_clip_limit, "CLAHE")
+        clip_limit = _strict_finite_number(self.clahe_clip_limit, "增强 CLAHE")
         if not 0.1 <= clip_limit <= 4.0:
             raise PreprocessError("增强 CLAHE 对比度限制必须在 0.1 到 4 之间。")
-        if len(self.clahe_tile_grid_size) != 2 or any(
+        if not isinstance(self.clahe_tile_grid_size, tuple) or len(
+            self.clahe_tile_grid_size
+        ) != 2 or any(
             isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 16
             for value in self.clahe_tile_grid_size
         ):
             raise PreprocessError("增强 CLAHE 网格必须由 1 到 16 的整数构成。")
+        object.__setattr__(self, "white_balance_strength", strength)
+        object.__setattr__(self, "clahe_clip_limit", clip_limit)
 
 
 def crop(image: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
@@ -163,7 +174,16 @@ def _validate_output_size(output_size: tuple[int, int]) -> tuple[int, int]:
     height = _integer_coordinate(output_size[1], "透视输出")
     if width <= 0 or height <= 0:
         raise PreprocessError("透视输出尺寸必须为正数。")
-    return width, height
+    try:
+        return require_bounded_size(
+            width,
+            height,
+            label="透视输出尺寸",
+            max_edge=MAX_INTERMEDIATE_EDGE,
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PreprocessError(str(error)) from error
 
 
 def _white_balance(image: np.ndarray, strength: float) -> np.ndarray:
@@ -183,7 +203,19 @@ def _finite_number(value: object, label: str) -> float:
         raise PreprocessError(f"{label}参数必须为有限数值。")
     try:
         number = float(value)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
+        raise PreprocessError(f"{label}参数必须为有限数值。") from error
+    if not math.isfinite(number):
+        raise PreprocessError(f"{label}参数必须为有限数值。")
+    return number
+
+
+def _strict_finite_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PreprocessError(f"{label}参数必须为有限数值。")
+    try:
+        number = float(value)
+    except OverflowError as error:
         raise PreprocessError(f"{label}参数必须为有限数值。") from error
     if not math.isfinite(number):
         raise PreprocessError(f"{label}参数必须为有限数值。")

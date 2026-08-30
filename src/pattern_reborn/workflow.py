@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import numpy as np
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from pattern_reborn.analysis import (
     AnalysisError,
@@ -41,6 +41,7 @@ from pattern_reborn.images import load_working_image, save_png_atomic
 from pattern_reborn.knowledge import KnowledgeCatalog
 from pattern_reborn.mockups import ArtworkRef, compose_mockup, load_mockup_catalog, save_composed_mockup
 from pattern_reborn.patterns import PatternRequest, compose_pattern
+from pattern_reborn.preprocess import PreprocessSettings, enhance
 from pattern_reborn.projects import ProjectRepository
 from pattern_reborn.segmentation import (
     MaskStroke,
@@ -74,6 +75,14 @@ class ExtractCommand(BaseModel):
     profile: ProfileId
     hints: SegmentHints | None = None
     strokes: list[MaskStroke] = Field(default_factory=list)
+    preprocess: PreprocessSettings = Field(default_factory=PreprocessSettings)
+
+    @field_validator("preprocess", mode="before")
+    @classmethod
+    def validate_preprocess(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return PreprocessSettings(**value)
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,8 +162,9 @@ class PatternRebornService:
         source_path = self._resolve_artifact(project_dir, project.source.relative_path)
         working = load_working_image(source_path)
         rgb = np.ascontiguousarray(np.asarray(working.convert("RGB")), dtype=np.uint8)
+        processed = enhance(rgb, command.preprocess)
         hints = command.hints if command.hints is not None else SegmentHints()
-        result = self._segmenter.segment(rgb, command.profile, hints)
+        result = self._segmenter.segment(processed, command.profile, hints)
         mask = result.mask
         if command.strokes:
             mask = apply_mask_strokes(mask, command.strokes)
@@ -173,7 +183,10 @@ class PatternRebornService:
             "artifact_id": extracted_id,
             "mask": mask_id,
             "algorithm_version": result.algorithm_version,
-            "parameters": result.parameters,
+            "parameters": {
+                **result.parameters,
+                "preprocess": asdict(command.preprocess),
+            },
             "hints": result.hints.record(),
             "warnings": list(result.warnings),
         }

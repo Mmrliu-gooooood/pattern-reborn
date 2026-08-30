@@ -4,6 +4,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+from pydantic import ValidationError
 import pytest
 
 from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass, StepId
@@ -16,6 +19,7 @@ from pattern_reborn.generation.base import (
     TargetApplication,
 )
 from pattern_reborn.patterns import LayoutKind, PatternRequest
+from pattern_reborn.preprocess import PreprocessSettings, enhance
 from pattern_reborn.workflow import CreateProjectCommand, ExtractCommand, WorkflowError
 from tests.test_generation_base import make_generation_request
 
@@ -76,6 +80,84 @@ def test_navigation_state_persists_on_project_record(app_service, source_fixture
     assert saved.processing_parameters["current_step"] == StepId.ANALYSIS.value
     assert reloaded.processing_parameters["current_step"] == StepId.ANALYSIS.value
     assert reloaded.processing_parameters["draft"]["unsaved_note"] == "待确认"
+
+
+def test_extract_applies_preprocess_before_segmenting(
+    app_service,
+    source_fixture: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _create(app_service, source_fixture)
+    settings = PreprocessSettings(
+        white_balance_strength=0.75,
+        denoise_strength=0,
+        clahe_clip_limit=2.0,
+        clahe_tile_grid_size=(4, 4),
+    )
+    with Image.open(source_fixture) as image:
+        original = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    expected = enhance(original, settings)
+    received: list[np.ndarray] = []
+    segmenter = app_service._segmenter
+    real_segment = segmenter.segment
+
+    def record_segment_input(image, profile, hints):
+        received.append(image.copy())
+        return real_segment(image, profile, hints)
+
+    monkeypatch.setattr(segmenter, "segment", record_segment_input)
+
+    app_service.extract(
+        project.id,
+        ExtractCommand(profile=ProfileId.FLAT_COLOR, preprocess=settings),
+    )
+
+    assert len(received) == 1
+    assert np.array_equal(received[0], expected)
+    assert not np.array_equal(received[0], original)
+
+
+def test_extract_persists_preprocess_settings(app_service, source_fixture: Path) -> None:
+    project = _create(app_service, source_fixture)
+    settings = PreprocessSettings(
+        white_balance_strength=0.75,
+        denoise_strength=0,
+        clahe_clip_limit=2.0,
+        clahe_tile_grid_size=(4, 4),
+    )
+
+    app_service.extract(
+        project.id,
+        ExtractCommand(profile=ProfileId.FLAT_COLOR, preprocess=settings),
+    )
+
+    pending = app_service.load_project(project.id).processing_parameters["pending_extraction"]
+    assert pending["parameters"]["preprocess"] == {
+        "white_balance_strength": 0.75,
+        "denoise_strength": 0,
+        "clahe_clip_limit": 2.0,
+        "clahe_tile_grid_size": [4, 4],
+    }
+
+
+@pytest.mark.parametrize(
+    "preprocess",
+    [
+        {"white_balance_strength": "0.1"},
+        {"white_balance_strength": True},
+        {"denoise_strength": "3"},
+        {"denoise_strength": False},
+        {"clahe_clip_limit": "1.25"},
+        {"clahe_clip_limit": True},
+        {"clahe_tile_grid_size": ("8", 8)},
+        {"clahe_tile_grid_size": (True, 8)},
+    ],
+)
+def test_extract_command_rejects_preprocess_field_coercion(
+    preprocess: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ExtractCommand(profile=ProfileId.FLAT_COLOR, preprocess=preprocess)  # type: ignore[arg-type]
 
 
 def test_confirm_extraction_clears_pending_extraction(app_service, source_fixture: Path) -> None:

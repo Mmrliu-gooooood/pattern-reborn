@@ -1,5 +1,6 @@
 import math
 
+import cv2
 import numpy as np
 import pytest
 
@@ -72,6 +73,29 @@ def test_perspective_transform_rejects_invalid_points_or_output_size(
         perspective_correct(source, points, output_size=output_size)  # type: ignore[arg-type]
 
 
+def test_perspective_rejects_oversized_output_before_warp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = np.zeros((120, 160, 3), dtype=np.uint8)
+    points = [(10, 10), (150, 15), (145, 110), (15, 105)]
+
+    def unexpected_warp(*args: object, **kwargs: object) -> np.ndarray:
+        raise AssertionError("warpPerspective must not run for an oversized output")
+
+    monkeypatch.setattr(cv2, "warpPerspective", unexpected_warp)
+
+    with pytest.raises(PreprocessError, match="安全上限"):
+        perspective_correct(source, points, output_size=(100_000, 100_000))
+
+
+def test_perspective_rejects_enormous_integer_output_with_typed_error() -> None:
+    source = np.zeros((120, 160, 3), dtype=np.uint8)
+    points = [(10, 10), (150, 15), (145, 110), (15, 105)]
+
+    with pytest.raises(PreprocessError, match="透视"):
+        perspective_correct(source, points, output_size=(10**10_000, 80))
+
+
 def test_enhance_is_deterministic_and_does_not_mutate_input() -> None:
     y, x = np.indices((32, 32))
     source = np.stack(((x * 7) % 256, (y * 9) % 256, ((x + y) * 5) % 256), axis=-1).astype(
@@ -106,3 +130,33 @@ def test_enhance_is_deterministic_and_does_not_mutate_input() -> None:
 def test_enhancement_settings_reject_unsafe_values(kwargs: dict[str, object]) -> None:
     with pytest.raises(PreprocessError, match="增强"):
         PreprocessSettings(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"white_balance_strength": "0.1"},
+        {"white_balance_strength": True},
+        {"denoise_strength": "3"},
+        {"denoise_strength": False},
+        {"clahe_clip_limit": "1.25"},
+        {"clahe_clip_limit": True},
+        {"clahe_tile_grid_size": ("8", 8)},
+        {"clahe_tile_grid_size": (True, 8)},
+    ],
+)
+def test_enhancement_settings_reject_string_and_bool_coercion(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(PreprocessError):
+        PreprocessSettings(**kwargs)
+
+
+def test_enhancement_settings_reject_malformed_grid_with_typed_error() -> None:
+    with pytest.raises(PreprocessError, match="增强"):
+        PreprocessSettings(clahe_tile_grid_size=8)  # type: ignore[arg-type]
+
+
+def test_enhancement_settings_reject_enormous_integer_with_typed_error() -> None:
+    with pytest.raises(PreprocessError, match="增强"):
+        PreprocessSettings(white_balance_strength=10**10_000)
