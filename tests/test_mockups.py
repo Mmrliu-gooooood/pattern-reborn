@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 import json
 from pathlib import Path
+import threading
+import time
 
 from PIL import Image
 import pytest
 
 import pattern_reborn.images as images_module
+import pattern_reborn.mockups as mockups_module
 from pattern_reborn.mockups import (
     ArtworkRef,
     MockupError,
@@ -164,7 +167,7 @@ def test_save_composed_mockup_discards_an_interrupted_preparation_before_publish
     sidecar = destination.with_suffix(".json")
     destination.write_bytes(b"old png")
     sidecar.write_text('{"ai_assisted": false}\n', encoding="utf-8")
-    interrupted = tmp_path / ".bookmark.interrupted.mockup-txn"
+    interrupted = tmp_path / ".bookmark.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.mockup-txn"
     interrupted.mkdir()
     (interrupted / "journal.json").write_text(
         json.dumps(
@@ -218,3 +221,152 @@ def test_save_composed_mockup_can_retry_recovery_after_the_second_rollback_fails
     with Image.open(destination) as saved:
         assert saved.size == result.image.size
     assert json.loads(sidecar.read_text(encoding="utf-8")) == {"ai_assisted": True}
+
+
+def test_save_composed_mockup_recovers_after_a_crash_during_png_published_journal_advance(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a crash replacing the journal after the PNG has reached its public path."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    real_replace = images_module.os.replace
+
+    def crash_before_advancing_png_journal(source: object, target: object) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        if (
+            target_path.name == "journal.json"
+            and source_path.name.startswith(".journal.")
+            and '"png_published"' in source_path.read_text(encoding="utf-8")
+        ):
+            raise KeyboardInterrupt("simulated process crash")
+        real_replace(source, target)
+
+    monkeypatch.setattr(images_module.os, "replace", crash_before_advancing_png_journal)
+    with pytest.raises(KeyboardInterrupt):
+        save_composed_mockup(result, destination)
+
+    monkeypatch.setattr(images_module.os, "replace", real_replace)
+    save_composed_mockup(result, destination)
+
+    with Image.open(destination) as saved:
+        assert saved.size == result.image.size
+    assert json.loads(destination.with_suffix(".json").read_text(encoding="utf-8")) == {"ai_assisted": True}
+
+
+def test_save_composed_mockup_rejects_forged_transaction_directory_without_deleting_it(
+    mockup_catalog, ai_pattern: ArtworkRef, tmp_path: Path
+) -> None:
+    """Catches recovery recursively deleting unrecognised content under a matching directory."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    forged = tmp_path / ".bookmark.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mockup-txn"
+    forged.mkdir()
+    sentinel = forged / "do-not-delete.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    (forged / "journal.json").write_text(
+        json.dumps(
+            {
+                "destination": destination.name,
+                "sidecar": destination.with_suffix(".json").name,
+                "previous": {"png": False, "json": False},
+                "state": "committed",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MockupError, match="事务"):
+        save_composed_mockup(result, destination)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_save_composed_mockup_reports_cleanup_failure_without_discarding_backups(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches cleanup silently losing recovery material when backup deletion fails."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    destination.write_bytes(b"old png")
+    destination.with_suffix(".json").write_bytes(b'{"ai_assisted": false}\n')
+    real_unlink = Path.unlink
+
+    def reject_previous_png_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path.name == "previous.png":
+            raise PermissionError("backup cleanup denied")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_previous_png_unlink)
+
+    with pytest.raises(MockupError, match="清理"):
+        save_composed_mockup(result, destination)
+
+    transaction = next(tmp_path.glob(".bookmark.*.mockup-txn"))
+    assert (transaction / "previous.png").exists()
+    assert json.loads((transaction / "journal.json").read_text(encoding="utf-8"))["state"] == "committed"
+
+
+def test_save_composed_mockup_rejects_non_png_destination(
+    mockup_catalog, ai_pattern: ArtworkRef, tmp_path: Path
+) -> None:
+    """Catches a sidecar path aliasing the requested public artifact path."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+
+    with pytest.raises(MockupError, match="PNG"):
+        save_composed_mockup(result, tmp_path / "bookmark.json")
+
+    assert not (tmp_path / "bookmark.json").exists()
+
+
+def test_save_composed_mockup_serializes_concurrent_publication_of_one_pair(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches two publishers entering the recovery-to-publication window together."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    first_staging_started = threading.Event()
+    allow_first_to_continue = threading.Event()
+    second_staging_started = threading.Event()
+    real_stage_png = mockups_module._write_staged_png
+
+    def pause_first_staging(image: Image.Image, path: Path) -> None:
+        if threading.current_thread().name == "first-publisher":
+            first_staging_started.set()
+            assert allow_first_to_continue.wait(timeout=2)
+        else:
+            second_staging_started.set()
+        real_stage_png(image, path)
+
+    monkeypatch.setattr(mockups_module, "_write_staged_png", pause_first_staging)
+    failures: list[BaseException] = []
+
+    def publish() -> None:
+        try:
+            save_composed_mockup(result, destination)
+        except BaseException as error:  # pragma: no cover - asserted below
+            failures.append(error)
+
+    first = threading.Thread(target=publish, name="first-publisher")
+    second = threading.Thread(target=publish, name="second-publisher")
+    first.start()
+    assert first_staging_started.wait(timeout=2)
+    second.start()
+    time.sleep(0.1)
+    assert not second_staging_started.is_set()
+    allow_first_to_continue.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert failures == []
+    assert second_staging_started.is_set()

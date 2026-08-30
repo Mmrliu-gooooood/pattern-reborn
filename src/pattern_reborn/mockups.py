@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import stat
+import time
 from typing import Sequence
 from uuid import uuid4
 
@@ -34,6 +38,12 @@ _VERMILION = (179, 59, 52, 255)
 _GOLD = (184, 151, 90, 255)
 _CASE = (52, 58, 56, 255)
 _CAMERA = (30, 32, 31, 255)
+_TRANSACTION_SUFFIX = ".mockup-txn"
+_TRANSACTION_ID = r"[0-9a-f]{32}"
+_JOURNAL_TEMP = re.compile(r"^\.journal\.[0-9a-f]{32}\.tmp$")
+_RESTORATION_TEMP = re.compile(r"^\.previous\.(?:png|json)\.[0-9a-f]{32}\.restore$")
+_TRANSACTION_FILES = frozenset({"journal.json", "staged.png", "staged.json", "previous.png", "previous.json"})
+_JOURNAL_STATES = frozenset({"preparing", "prepared", "png_published", "committed", "rolled_back"})
 
 _TEMPLATE_SPECS: dict[str, dict[str, object]] = {
     "bookmark": {
@@ -124,39 +134,46 @@ def save_composed_mockup(result: MockupResult, destination: Path) -> None:
 def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
     """Publish a mockup PNG and provenance sidecar as a recoverable pair."""
     dest = Path(destination)
+    _validate_mockup_destination(dest)
     sidecar = dest.with_suffix(".json")
     payload = {"ai_assisted": bool(result.ai_assisted)}
-    transaction: Path | None = None
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        _recover_interrupted_mockup_transactions(dest)
-        transaction = dest.parent / f".{dest.stem}.{uuid4().hex}.mockup-txn"
-        transaction.mkdir()
-        previous = {
-            "png": dest.exists(),
-            "json": sidecar.exists(),
-        }
-        _write_transaction_journal(transaction, dest, previous, state="preparing")
-        _copy_previous_file(dest, transaction / "previous.png", previous["png"])
-        _copy_previous_file(sidecar, transaction / "previous.json", previous["json"])
-        _write_staged_png(result.image, transaction / "staged.png")
-        _write_staged_json(transaction / "staged.json", payload)
-        _write_transaction_journal(transaction, dest, previous, state="prepared")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with _destination_pair_lock(dest):
+        transaction: Path | None = None
+        try:
+            _recover_interrupted_mockup_transactions(dest)
+            transaction = dest.parent / f".{dest.stem}.{uuid4().hex}{_TRANSACTION_SUFFIX}"
+            transaction.mkdir()
+            _fsync_directory(dest.parent)
+            previous = {"png": dest.exists(), "json": sidecar.exists()}
+            _write_transaction_journal(transaction, dest, previous, state="preparing")
+            _copy_previous_file(dest, transaction / "previous.png", previous["png"])
+            _copy_previous_file(sidecar, transaction / "previous.json", previous["json"])
+            _write_staged_png(result.image, transaction / "staged.png")
+            _write_staged_json(transaction / "staged.json", payload)
+            _fsync_directory(transaction)
+            _write_transaction_journal(transaction, dest, previous, state="prepared")
 
-        os.replace(transaction / "staged.png", dest)
-        _write_transaction_journal(transaction, dest, previous, state="png_published")
-        os.replace(transaction / "staged.json", sidecar)
-        _write_transaction_journal(transaction, dest, previous, state="committed")
-    except (ImageValidationError, OSError, ValueError, TypeError) as error:
+            os.replace(transaction / "staged.png", dest)
+            _fsync_directory(dest.parent)
+            _write_transaction_journal(transaction, dest, previous, state="png_published")
+            os.replace(transaction / "staged.json", sidecar)
+            _fsync_directory(dest.parent)
+            _write_transaction_journal(transaction, dest, previous, state="committed")
+        except MockupError:
+            raise
+        except (ImageValidationError, OSError, ValueError, TypeError) as error:
+            if transaction is not None:
+                try:
+                    _restore_mockup_pair(transaction, dest, sidecar)
+                except OSError as recovery_error:
+                    raise MockupError("贴图保存失败，恢复或事务清理失败。") from recovery_error
+            raise MockupError("贴图保存失败，已恢复原有文件。") from error
         if transaction is not None:
             try:
-                _restore_mockup_pair(transaction, dest, sidecar)
-            except OSError:
-                pass
-        raise MockupError("贴图保存失败，已尝试恢复原有文件。") from error
-    else:
-        if transaction is not None:
-            _discard_transaction(transaction)
+                _cleanup_transaction(transaction, dest)
+            except OSError as error:
+                raise MockupError("贴图发布完成，但事务清理失败。") from error
 
 
 def _template_from_metadata(root: Path, record: object) -> MockupTemplate:
@@ -229,7 +246,7 @@ def _write_staged_png(image: Image.Image, path: Path) -> None:
     with path.open("xb") as handle:
         image.save(handle, format="PNG")
         handle.flush()
-        _flush_to_disk(handle)
+        _fsync_file(handle)
 
 
 def _write_staged_json(path: Path, payload: dict[str, bool]) -> None:
@@ -237,7 +254,7 @@ def _write_staged_json(path: Path, payload: dict[str, bool]) -> None:
     with path.open("xb") as handle:
         handle.write(encoded)
         handle.flush()
-        _flush_to_disk(handle)
+        _fsync_file(handle)
 
 
 def _write_transaction_journal(
@@ -248,33 +265,38 @@ def _write_transaction_journal(
     state: str,
 ) -> None:
     journal = transaction / "journal.json"
+    temporary = transaction / f".journal.{uuid4().hex}.tmp"
     payload = {
         "destination": destination.name,
         "sidecar": destination.with_suffix(".json").name,
         "previous": previous,
         "state": state,
     }
-    with journal.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-        handle.flush()
-        _flush_to_disk(handle)
+    try:
+        with temporary.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            _fsync_file(handle)
+        os.replace(temporary, journal)
+        _fsync_directory(transaction)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _copy_previous_file(source: Path, backup: Path, exists: bool) -> None:
     if exists:
-        shutil.copyfile(source, backup)
+        _copy_file_and_sync(source, backup)
 
 
 def _recover_interrupted_mockup_transactions(destination: Path) -> None:
-    for transaction in destination.parent.glob(f".{destination.stem}.*.mockup-txn"):
-        if not transaction.is_dir():
-            continue
+    for transaction in _transaction_directories(destination):
         try:
             journal = _read_transaction_journal(transaction, destination)
             if journal["state"] in {"prepared", "png_published"}:
                 _restore_mockup_pair(transaction, destination, destination.with_suffix(".json"), journal)
-            _discard_transaction(transaction)
+            else:
+                _cleanup_transaction(transaction, destination)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
             raise MockupError("检测到无法安全恢复的贴图发布事务。")
 
@@ -291,7 +313,9 @@ def _restore_mockup_pair(
         raise OSError("mockup transaction journal is invalid")
     _restore_previous_file(transaction / "previous.png", destination, previous.get("png"))
     _restore_previous_file(transaction / "previous.json", sidecar, previous.get("json"))
-    _discard_transaction(transaction)
+    _fsync_directory(destination.parent)
+    _write_transaction_journal(transaction, destination, previous, state="rolled_back")
+    _cleanup_transaction(transaction, destination)
 
 
 def _read_transaction_journal(transaction: Path, destination: Path) -> dict[str, object]:
@@ -300,7 +324,10 @@ def _read_transaction_journal(transaction: Path, destination: Path) -> dict[str,
         not isinstance(payload, dict)
         or payload.get("destination") != destination.name
         or payload.get("sidecar") != destination.with_suffix(".json").name
-        or payload.get("state") not in {"preparing", "prepared", "png_published", "committed"}
+        or payload.get("state") not in _JOURNAL_STATES
+        or not isinstance(payload.get("previous"), dict)
+        or set(payload["previous"]) != {"png", "json"}
+        or any(not isinstance(value, bool) for value in payload["previous"].values())
     ):
         raise OSError("mockup transaction journal is invalid")
     return payload
@@ -310,7 +337,7 @@ def _restore_previous_file(backup: Path, destination: Path, existed: object) -> 
     if existed is True:
         restoration = backup.parent / f".{backup.name}.{uuid4().hex}.restore"
         try:
-            shutil.copyfile(backup, restoration)
+            _copy_file_and_sync(backup, restoration)
             os.replace(restoration, destination)
         finally:
             restoration.unlink(missing_ok=True)
@@ -320,15 +347,129 @@ def _restore_previous_file(backup: Path, destination: Path, existed: object) -> 
         raise OSError("mockup transaction journal is invalid")
 
 
-def _discard_transaction(transaction: Path) -> None:
-    shutil.rmtree(transaction, ignore_errors=True)
+def _validate_mockup_destination(destination: Path) -> None:
+    if destination.suffix.lower() != ".png":
+        raise MockupError("贴图目标必须是 PNG 文件。")
+    parent = destination.parent.resolve(strict=False)
+    resolved = destination.resolve(strict=False)
+    sidecar = destination.with_suffix(".json").resolve(strict=False)
+    if resolved.parent != parent or sidecar.parent != parent or resolved == sidecar:
+        raise MockupError("贴图目标路径必须是同一目录下的 PNG 文件。")
 
 
-def _flush_to_disk(handle: object) -> None:
+@contextmanager
+def _destination_pair_lock(destination: Path):
+    lock_path = destination.parent / f".{destination.stem}.mockup.lock"
+    with lock_path.open("a+b") as handle:
+        handle.seek(0)
+        handle.write(b"\0")
+        handle.flush()
+        deadline = time.monotonic() + 10.0
+        while True:
+            try:
+                _lock_file(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise MockupError("贴图发布正在进行，请稍后重试。")
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            _unlock_file(handle)
+
+
+def _lock_file(handle: object) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)  # type: ignore[attr-defined]
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
+
+
+def _unlock_file(handle: object) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)  # type: ignore[attr-defined]
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
+
+
+def _transaction_directories(destination: Path) -> list[Path]:
+    expression = re.compile(rf"^\.{re.escape(destination.stem)}\.{_TRANSACTION_ID}{re.escape(_TRANSACTION_SUFFIX)}$")
+    transactions = []
+    for candidate in destination.parent.iterdir():
+        if expression.fullmatch(candidate.name):
+            _validate_transaction_directory(candidate, destination)
+            transactions.append(candidate)
+    return transactions
+
+
+def _validate_transaction_directory(transaction: Path, destination: Path) -> None:
+    parent = destination.parent.resolve(strict=False)
+    if (
+        transaction.parent.resolve(strict=False) != parent
+        or not transaction.is_dir()
+        or _is_reparse_point(transaction)
+        or transaction.resolve(strict=False).parent != parent
+    ):
+        raise OSError("mockup transaction path is unsafe")
+
+
+def _cleanup_transaction(transaction: Path, destination: Path) -> None:
+    _validate_transaction_directory(transaction, destination)
+    entries = list(transaction.iterdir())
+    unexpected = [entry for entry in entries if not _is_safe_transaction_entry(entry)]
+    if unexpected:
+        raise OSError("mockup transaction contains unexpected content")
+    journal = transaction / "journal.json"
+    for entry in entries:
+        if entry != journal:
+            entry.unlink()
+    journal.unlink(missing_ok=True)
+    transaction.rmdir()
+    _fsync_directory(destination.parent)
+
+
+def _is_safe_transaction_entry(entry: Path) -> bool:
+    if not entry.is_file() or _is_reparse_point(entry):
+        return False
+    return entry.name in _TRANSACTION_FILES or bool(_JOURNAL_TEMP.fullmatch(entry.name)) or bool(
+        _RESTORATION_TEMP.fullmatch(entry.name)
+    )
+
+
+def _is_reparse_point(path: Path) -> bool:
+    attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    return path.is_symlink() or bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _copy_file_and_sync(source: Path, destination: Path) -> None:
+    shutil.copyfile(source, destination)
+    with destination.open("r+b") as handle:
+        _fsync_file(handle)
+
+
+def _fsync_file(handle: object) -> None:
+    os.fsync(handle.fileno())  # type: ignore[attr-defined]
+
+
+def _fsync_directory(directory: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
     try:
-        os.fsync(handle.fileno())  # type: ignore[attr-defined]
-    except OSError:
-        pass
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _warp_artwork(
