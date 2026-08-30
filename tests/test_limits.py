@@ -61,3 +61,14 @@ def test_scaled_size_rejects_coerced_non_finite_and_oversized_results() -> None:
                 label="缩放图像",
                 max_pixels=4_194_304,
             )
+
+
+def test_scaled_size_maps_enormous_integer_scale_to_typed_limit_error() -> None:
+    with pytest.raises(ImageLimitError, match="缩放图像.*安全上限"):
+        require_scaled_size(
+            1,
+            1,
+            10**10000,
+            label="缩放图像",
+            max_pixels=4_194_304,
+        )

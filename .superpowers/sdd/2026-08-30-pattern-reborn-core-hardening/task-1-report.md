@@ -317,3 +317,65 @@ The full suite was not repeated after the status interruption because self-revie
 ## Concerns
 
 None.
+
+## Fix Round 1
+
+### Review finding addressed
+
+`math.isfinite()` coerced enormous Python integers to a C double and raised raw `OverflowError` for `10**10000`, both when validating `scale` and when checking scaled integer products. This bypassed the required Chinese typed-error boundary in `require_scaled_size(...)` and `PatternRequest`.
+
+### Changes
+
+- Added `test_scaled_size_maps_enormous_integer_scale_to_typed_limit_error` in `tests/test_limits.py`.
+- Added `test_pattern_request_maps_enormous_integer_scale_to_typed_error` in `tests/test_patterns.py`.
+- Added `_is_finite_number(...)` in `src/pattern_reborn/limits.py`; integers are inherently finite, while floats still use `math.isfinite()`.
+- Routed enormous integer outputs through the existing edge/pixel budget so they raise `ImageLimitError` and the established `PatternError`/`ValidationError` surface instead of raw `OverflowError`.
+
+### RED
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_limits.py::test_scaled_size_maps_enormous_integer_scale_to_typed_limit_error tests/test_patterns.py::test_pattern_request_maps_enormous_integer_scale_to_typed_error -q
+```
+
+Relevant output:
+
+```text
+OverflowError: int too large to convert to float
+FAILED tests/test_limits.py::test_scaled_size_maps_enormous_integer_scale_to_typed_limit_error
+FAILED tests/test_patterns.py::test_pattern_request_maps_enormous_integer_scale_to_typed_error
+2 failed in 0.17s
+```
+
+### GREEN
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_limits.py::test_scaled_size_maps_enormous_integer_scale_to_typed_limit_error tests/test_patterns.py::test_pattern_request_maps_enormous_integer_scale_to_typed_error -q
+```
+
+Relevant output:
+
+```text
+2 passed in 0.03s
+```
+
+### Covering verification
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_limits.py tests/test_patterns.py -q
+```
+
+Relevant output:
+
+```text
+34 passed in 0.12s
+```
+
+### Fix-round concerns
+
+None.

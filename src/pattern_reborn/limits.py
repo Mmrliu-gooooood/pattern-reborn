@@ -14,6 +14,10 @@ class ImageLimitError(ValueError):
     """图像尺寸或缩放参数超出安全处理范围。"""
 
 
+def _is_finite_number(value: int | float) -> bool:
+    return isinstance(value, int) or math.isfinite(value)
+
+
 def require_bounded_size(
     width: object,
     height: object,
@@ -53,7 +57,7 @@ def require_scaled_size(
     if (
         isinstance(scale, bool)
         or not isinstance(scale, (int, float))
-        or not math.isfinite(scale)
+        or not _is_finite_number(scale)
         or scale <= 0
     ):
         raise ImageLimitError(f"{label}缩放比例必须为正的有限数值。")
@@ -63,7 +67,7 @@ def require_scaled_size(
         scaled_height_value = height * scale
     except OverflowError as error:
         raise ImageLimitError(f"{label}超出安全上限。") from error
-    if not math.isfinite(scaled_width_value) or not math.isfinite(scaled_height_value):
+    if not _is_finite_number(scaled_width_value) or not _is_finite_number(scaled_height_value):
         raise ImageLimitError(f"{label}超出安全上限。")
 
     scaled_width = max(1, round(scaled_width_value))

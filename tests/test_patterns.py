@@ -63,6 +63,15 @@ def test_pattern_request_rejects_unsafe_scale_before_transform(scale: object) ->
         PatternRequest(layout=LayoutKind.MIRROR, canvas=(256, 256), scale=scale)
 
 
+def test_pattern_request_maps_enormous_integer_scale_to_typed_error() -> None:
+    with pytest.raises((PatternError, ValidationError), match="缩放.*安全上限"):
+        PatternRequest(
+            layout=LayoutKind.MIRROR,
+            canvas=(256, 256),
+            scale=10**10000,
+        )
+
+
 def test_compose_rejects_oversized_scaled_stamp_before_transform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
