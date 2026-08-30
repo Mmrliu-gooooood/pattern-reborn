@@ -370,3 +370,56 @@ def test_save_composed_mockup_serializes_concurrent_publication_of_one_pair(
     assert not first.is_alive() and not second.is_alive()
     assert failures == []
     assert second_staging_started.is_set()
+
+
+def test_save_composed_mockup_maps_destination_directory_creation_failure_to_mockup_error(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches the outer filesystem boundary leaking a raw directory-creation error."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    real_mkdir = Path.mkdir
+
+    def reject_destination_parent(path: Path, *args: object, **kwargs: object) -> None:
+        if path == tmp_path:
+            raise PermissionError("destination directory denied")
+        real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", reject_destination_parent)
+
+    with pytest.raises(MockupError, match="保存"):
+        save_composed_mockup(result, destination)
+
+
+def test_save_composed_mockup_rejects_existing_non_lock_file_without_changing_its_bytes(
+    mockup_catalog, ai_pattern: ArtworkRef, tmp_path: Path
+) -> None:
+    """Catches lock acquisition appending data to an untrusted predictable lock path."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    lock_path = tmp_path / ".bookmark.mockup.lock"
+    original = b"not a Pattern Reborn lock"
+    lock_path.write_bytes(original)
+
+    with pytest.raises(MockupError, match="锁"):
+        save_composed_mockup(result, destination)
+
+    assert lock_path.read_bytes() == original
+
+
+def test_save_composed_mockup_reuses_a_valid_lock_file_for_repeated_publication(
+    mockup_catalog, ai_pattern: ArtworkRef, tmp_path: Path
+) -> None:
+    """Protects normal repeated publication after lock-path validation is introduced."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+
+    save_composed_mockup(result, destination)
+    save_composed_mockup(result, destination)
+
+    with Image.open(destination) as saved:
+        assert saved.size == result.image.size
+    assert json.loads(destination.with_suffix(".json").read_text(encoding="utf-8")) == {"ai_assisted": True}

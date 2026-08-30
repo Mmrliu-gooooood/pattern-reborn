@@ -44,6 +44,7 @@ _JOURNAL_TEMP = re.compile(r"^\.journal\.[0-9a-f]{32}\.tmp$")
 _RESTORATION_TEMP = re.compile(r"^\.previous\.(?:png|json)\.[0-9a-f]{32}\.restore$")
 _TRANSACTION_FILES = frozenset({"journal.json", "staged.png", "staged.json", "previous.png", "previous.json"})
 _JOURNAL_STATES = frozenset({"preparing", "prepared", "png_published", "committed", "rolled_back"})
+_LOCK_MAGIC = b"Pattern Reborn mockup lock v1\n"
 
 _TEMPLATE_SPECS: dict[str, dict[str, object]] = {
     "bookmark": {
@@ -137,10 +138,11 @@ def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
     _validate_mockup_destination(dest)
     sidecar = dest.with_suffix(".json")
     payload = {"ai_assisted": bool(result.ai_assisted)}
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with _destination_pair_lock(dest):
-        transaction: Path | None = None
-        try:
+    transaction: Path | None = None
+    committed = False
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with _destination_pair_lock(dest):
             _recover_interrupted_mockup_transactions(dest)
             transaction = dest.parent / f".{dest.stem}.{uuid4().hex}{_TRANSACTION_SUFFIX}"
             transaction.mkdir()
@@ -160,20 +162,20 @@ def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
             os.replace(transaction / "staged.json", sidecar)
             _fsync_directory(dest.parent)
             _write_transaction_journal(transaction, dest, previous, state="committed")
-        except MockupError:
-            raise
-        except (ImageValidationError, OSError, ValueError, TypeError) as error:
-            if transaction is not None:
-                try:
-                    _restore_mockup_pair(transaction, dest, sidecar)
-                except OSError as recovery_error:
-                    raise MockupError("贴图保存失败，恢复或事务清理失败。") from recovery_error
-            raise MockupError("贴图保存失败，已恢复原有文件。") from error
-        if transaction is not None:
+            committed = True
+            _cleanup_transaction(transaction, dest)
+            transaction = None
+    except MockupError:
+        raise
+    except (ImageValidationError, OSError, ValueError, TypeError) as error:
+        if transaction is not None and not committed:
             try:
-                _cleanup_transaction(transaction, dest)
-            except OSError as error:
-                raise MockupError("贴图发布完成，但事务清理失败。") from error
+                _restore_mockup_pair(transaction, dest, sidecar)
+            except OSError as recovery_error:
+                raise MockupError("贴图保存失败，恢复或事务清理失败。") from recovery_error
+        if committed:
+            raise MockupError("贴图发布完成，但事务清理或锁释放失败。") from error
+        raise MockupError("贴图保存失败，已恢复原有文件。") from error
 
 
 def _template_from_metadata(root: Path, record: object) -> MockupTemplate:
@@ -360,23 +362,73 @@ def _validate_mockup_destination(destination: Path) -> None:
 @contextmanager
 def _destination_pair_lock(destination: Path):
     lock_path = destination.parent / f".{destination.stem}.mockup.lock"
-    with lock_path.open("a+b") as handle:
-        handle.seek(0)
-        handle.write(b"\0")
-        handle.flush()
-        deadline = time.monotonic() + 10.0
-        while True:
+    deadline = time.monotonic() + 10.0
+    handle = None
+    while handle is None:
+        try:
+            _ensure_safe_lock_file(lock_path)
+            candidate = lock_path.open("rb")
             try:
-                _lock_file(handle)
-                break
+                _validate_open_lock_file(lock_path, candidate)
+                _lock_file(candidate)
             except OSError:
+                candidate.close()
                 if time.monotonic() >= deadline:
                     raise MockupError("贴图发布正在进行，请稍后重试。")
                 time.sleep(0.01)
+                continue
+            except Exception:
+                candidate.close()
+                raise
+            handle = candidate
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise MockupError("贴图发布正在进行，请稍后重试。")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
         try:
-            yield
-        finally:
             _unlock_file(handle)
+        finally:
+            handle.close()
+
+
+def _ensure_safe_lock_file(lock_path: Path) -> None:
+    try:
+        metadata = os.lstat(lock_path)
+    except FileNotFoundError:
+        try:
+            with lock_path.open("xb") as handle:
+                handle.write(_LOCK_MAGIC)
+                handle.flush()
+                _fsync_file(handle)
+        except FileExistsError:
+            _validate_lock_metadata(lock_path, os.lstat(lock_path))
+        return
+    _validate_lock_metadata(lock_path, metadata)
+
+
+def _validate_open_lock_file(lock_path: Path, handle: object) -> None:
+    _validate_lock_metadata(lock_path, os.lstat(lock_path))
+    metadata = os.fstat(handle.fileno())  # type: ignore[attr-defined]
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise MockupError("贴图发布锁文件无效。")
+    if handle.read() != _LOCK_MAGIC:  # type: ignore[attr-defined]
+        raise MockupError("贴图发布锁文件无效。")
+
+
+def _validate_lock_metadata(lock_path: Path, metadata: os.stat_result) -> None:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or _is_reparse_point(lock_path)
+        or metadata.st_size != len(_LOCK_MAGIC)
+    ):
+        raise MockupError("贴图发布锁文件无效。")
+    with lock_path.open("rb") as handle:
+        if handle.read() != _LOCK_MAGIC:
+            raise MockupError("贴图发布锁文件无效。")
 
 
 def _lock_file(handle: object) -> None:
@@ -449,7 +501,8 @@ def _is_safe_transaction_entry(entry: Path) -> bool:
 
 def _is_reparse_point(path: Path) -> bool:
     attributes = getattr(os.lstat(path), "st_file_attributes", 0)
-    return path.is_symlink() or bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return path.is_symlink() or bool(attributes & reparse_point)
 
 
 def _copy_file_and_sync(source: Path, destination: Path) -> None:
