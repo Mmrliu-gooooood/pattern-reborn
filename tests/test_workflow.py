@@ -74,6 +74,14 @@ class RecordingSegmenter:
         )
 
 
+class UnavailableMobileSamSegmenter:
+    def validate_available(self) -> None:
+        raise RuntimeError("checkpoint is unavailable")
+
+    def segment(self, image, profile, hints) -> SegmentResult:
+        raise AssertionError("unavailable MobileSAM must not segment")
+
+
 def test_workflow_module_does_not_import_streamlit() -> None:
     import pattern_reborn.workflow as workflow
 
@@ -220,6 +228,36 @@ def test_extract_rejects_unavailable_mobile_sam_without_importing_optional_model
 
     imported = set(sys.modules) - before
     assert imported.isdisjoint({"torch", "mobile_sam"})
+
+
+def test_extract_validates_mobile_sam_before_source_decode_or_preprocess(
+    app_service,
+    source_fixture: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = PatternRebornService(
+        app_service.repository,
+        knowledge=app_service._knowledge,
+        export_root=tmp_path / "outputs",
+        mobile_sam_segmenter=UnavailableMobileSamSegmenter(),
+    )
+    project = _create(service, source_fixture)
+
+    def source_decode_must_not_run(*args, **kwargs):
+        raise AssertionError("source decode was reached")
+
+    def preprocess_must_not_run(*args, **kwargs):
+        raise AssertionError("preprocess was reached")
+
+    monkeypatch.setattr(workflow, "load_working_image", source_decode_must_not_run)
+    monkeypatch.setattr(workflow, "enhance", preprocess_must_not_run)
+
+    with pytest.raises(WorkflowError, match="^MobileSAM 当前不可用，请改用 OpenCV。$"):
+        service.extract(
+            project.id,
+            ExtractCommand(profile=ProfileId.FLAT_COLOR, backend="mobile_sam"),
+        )
 
 
 def test_extract_never_restores_pixels_hidden_by_source_alpha(

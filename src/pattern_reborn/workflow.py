@@ -240,6 +240,14 @@ class PatternRebornService:
         if command.backend is SegmentationBackend.MOBILE_SAM:
             if self._mobile_sam_segmenter is None:
                 raise WorkflowError("MobileSAM 当前不可用，请改用 OpenCV。")
+            validate_available = getattr(self._mobile_sam_segmenter, "validate_available", None)
+            if callable(validate_available):
+                try:
+                    validate_available()
+                except WorkflowError:
+                    raise
+                except Exception as error:
+                    raise WorkflowError("MobileSAM 当前不可用，请改用 OpenCV。") from error
             return self._mobile_sam_segmenter
         return self._segmenter
 

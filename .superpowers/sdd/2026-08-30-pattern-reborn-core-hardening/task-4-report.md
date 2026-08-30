@@ -183,3 +183,107 @@ feat: route optional MobileSAM with OpenCV fallback
 
 - The environment does not include or execute the real optional MobileSAM/Torch stack, so the package's real predictor construction and checkpoint compatibility remain an installation-time integration risk. The loader maps any import/model/checkpoint failure to the typed OpenCV guidance instead of breaking normal startup.
 - First MobileSAM use intentionally pays model-import and checkpoint-load latency. Normal startup and all default OpenCV extraction remain free of that cost.
+
+## Fix Round 1: Preflight MobileSAM before image decode
+
+### Finding addressed
+
+When the optional route was selected, `PatternRebornService.extract()` chose the lazy proxy before image decoding, but the proxy did not import MobileSAM, validate the checkpoint, or construct the predictor until its later `segment()` call. A missing/corrupt checkpoint, import error, or model-construction error could therefore occur after Pillow decoding, NumPy conversion, and OpenCV preprocessing.
+
+### Minimal change
+
+- `app.py`: `_LazyMobileSamSegmenter.validate_available()` now initializes and retains the real adapter on first MobileSAM selection. It checks that the checkpoint is a file before importing `mobile_sam`; import, checkpoint, model, or predictor failures retain the established Chinese `WorkflowError` mapping. `segment()` delegates to this validator, so the route is still lazy at startup but preflighted before source work.
+- `src/pattern_reborn/workflow.py`: MobileSAM routing invokes a duck-typed `validate_available()` when supplied by the selected segmenter, translating any non-workflow failure to `WorkflowError("MobileSAM 当前不可用，请改用 OpenCV。")` before resolving/decoding the source artifact.
+- `tests/test_workflow.py`: added a behavior regression test whose MobileSAM validator fails and whose source decoder and preprocessor raise `AssertionError` if reached. The asserted `WorkflowError` proves failure is mapped correctly and neither image decode nor preprocessing is touched.
+
+### Files changed
+
+- Modified `app.py`
+- Modified `src/pattern_reborn/workflow.py`
+- Modified `tests/test_workflow.py`
+- Modified this report
+
+### TDD RED evidence
+
+The new test was written before the production changes. Command (the explicit `sys.path.insert(0, ...)` prevents this test process from using the original repository's editable install):
+
+```powershell
+& 'D:\code\ican\pattern-reborn\.venv\Scripts\python.exe' -c "import sys; sys.path.insert(0, r'D:\code\ican\pattern-reborn-codex\src'); import pytest; raise SystemExit(pytest.main(['tests/test_workflow.py::test_extract_validates_mobile_sam_before_source_decode_or_preprocess', '-q']))"
+```
+
+Original failure output:
+
+```text
+F                                                                        [100%]
+================================== FAILURES ===================================
+____ test_extract_validates_mobile_sam_before_source_decode_or_preprocess _____
+
+...
+src\pattern_reborn\workflow.py:194: in extract
+    working = load_working_image(source_path)
+...
+    def source_decode_must_not_run(*args, **kwargs):
+>       raise AssertionError("source decode was reached")
+E       AssertionError: source decode was reached
+
+tests\test_workflow.py:248: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_workflow.py::test_extract_validates_mobile_sam_before_source_decode_or_preprocess
+1 failed in 0.28s
+```
+
+Exit code: `1`. This is the expected pre-fix failure: source decode was reached before the selected MobileSAM adapter's availability error.
+
+### TDD GREEN and focused coverage
+
+Same single-test command after production changes:
+
+```text
+.                                                                        [100%]
+1 passed in 0.12s
+```
+
+Exit code: `0`.
+
+Focused command:
+
+```powershell
+& 'D:\code\ican\pattern-reborn\.venv\Scripts\python.exe' -c "import sys; sys.path.insert(0, r'D:\code\ican\pattern-reborn-codex\src'); import pytest; raise SystemExit(pytest.main(['tests/test_workflow.py', 'tests/test_capabilities.py', 'tests/smoke/test_app_startup.py', '-q']))"
+```
+
+Original output:
+
+```text
+...............................................................          [100%]
+63 passed in 8.60s
+```
+
+Exit code: `0`.
+
+### Full-suite result
+
+The full suite was executed once after the final production change with the same `src`-first interpreter setup:
+
+```powershell
+& 'D:\code\ican\pattern-reborn\.venv\Scripts\python.exe' -c "import sys; sys.path.insert(0, r'D:\code\ican\pattern-reborn-codex\src'); import pytest; raise SystemExit(pytest.main(['-q']))"
+```
+
+The execution bridge returned the following original progress output before closing its PTY:
+
+```text
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 60%]
+........
+```
+
+It did not return pytest's final summary/exit line. The spawned pytest processes had exited when checked; `.pytest_cache/v/cache/lastfailed` was `{}` and the cached collected-node count was `357`. This is recorded as incomplete terminal evidence rather than represented as a fabricated pass summary. No second full-suite run was made, per the one-run requirement.
+
+### Self-review
+
+- The preflight is requested only for the explicit `mobile_sam` backend; the default OpenCV path and its offline startup behavior are unchanged.
+- Application startup still constructs only the proxy: it does not import Torch/MobileSAM, read the checkpoint, or allocate the predictor. That work begins only after a user selects MobileSAM extraction, now before any source decode/NumPy/enhance work.
+- Missing checkpoint, import failure, corrupt/incompatible checkpoint, and predictor construction failure all occur during proxy preflight and are surfaced as the pre-existing clear Chinese `WorkflowError`.
+- The workflow accepts existing injected `Segmenter` implementations unchanged: validation is optional and duck-typed. An unwired MobileSAM route retains its exact existing error.
+- The test guards actual boundaries by making `load_working_image` and `enhance` fail if touched; it does not merely count mock calls.
+- `git diff --check` exited `0` (only expected CRLF normalization warnings were emitted by Git).

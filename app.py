@@ -42,12 +42,17 @@ class _LazyMobileSamSegmenter:
         self._segmenter = None
 
     def segment(self, image, profile, hints):
+        self.validate_available()
+        return self._segmenter.segment(image, profile, hints)
+
+    def validate_available(self) -> None:
         if self._segmenter is None:
             self._segmenter = self._load_segmenter()
-        return self._segmenter.segment(image, profile, hints)
 
     def _load_segmenter(self):
         try:
+            if not self._checkpoint.is_file():
+                raise FileNotFoundError(self._checkpoint)
             from mobile_sam import SamPredictor, sam_model_registry
 
             from pattern_reborn.segmentation import MobileSamSegmenter
