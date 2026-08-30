@@ -41,7 +41,7 @@ from pattern_reborn.images import load_working_image, save_png_atomic
 from pattern_reborn.knowledge import KnowledgeCatalog
 from pattern_reborn.mockups import ArtworkRef, compose_mockup, load_mockup_catalog, save_composed_mockup
 from pattern_reborn.patterns import PatternRequest, compose_pattern
-from pattern_reborn.preprocess import PreprocessSettings, enhance
+from pattern_reborn.preprocess import PreprocessError, PreprocessSettings, enhance
 from pattern_reborn.projects import ProjectRepository
 from pattern_reborn.segmentation import (
     MaskStroke,
@@ -81,7 +81,13 @@ class ExtractCommand(BaseModel):
     @classmethod
     def validate_preprocess(cls, value: object) -> object:
         if isinstance(value, dict):
-            return PreprocessSettings(**value)
+            normalized = dict(value)
+            grid = normalized.get("clahe_tile_grid_size")
+            if isinstance(grid, list):
+                if len(grid) != 2 or any(type(item) is not int for item in grid):
+                    raise PreprocessError("增强 CLAHE 网格必须由 1 到 16 的整数构成。")
+                normalized["clahe_tile_grid_size"] = tuple(grid)
+            return PreprocessSettings(**normalized)
         return value
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import numpy as np
@@ -158,6 +159,52 @@ def test_extract_command_rejects_preprocess_field_coercion(
 ) -> None:
     with pytest.raises(ValidationError):
         ExtractCommand(profile=ProfileId.FLAT_COLOR, preprocess=preprocess)  # type: ignore[arg-type]
+
+
+def test_extract_command_accepts_json_style_grid_list() -> None:
+    command = ExtractCommand(
+        profile=ProfileId.FLAT_COLOR,
+        preprocess={"clahe_tile_grid_size": [4, 6]},  # type: ignore[arg-type]
+    )
+
+    assert command.preprocess.clahe_tile_grid_size == (4, 6)
+
+
+def test_extract_command_accepts_grid_array_from_json() -> None:
+    command = ExtractCommand.model_validate_json(
+        json.dumps(
+            {
+                "profile": ProfileId.FLAT_COLOR.value,
+                "preprocess": {"clahe_tile_grid_size": [4, 6]},
+            }
+        )
+    )
+
+    assert command.preprocess.clahe_tile_grid_size == (4, 6)
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        [True, 8],
+        [8.0, 8],
+        ["8", 8],
+        [8],
+        [8, 8, 8],
+        [0, 8],
+        [17, 8],
+    ],
+)
+def test_extract_command_rejects_invalid_grid_arrays_from_json(grid: list[object]) -> None:
+    payload = json.dumps(
+        {
+            "profile": ProfileId.FLAT_COLOR.value,
+            "preprocess": {"clahe_tile_grid_size": grid},
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        ExtractCommand.model_validate_json(payload)
 
 
 def test_confirm_extraction_clears_pending_extraction(app_service, source_fixture: Path) -> None:

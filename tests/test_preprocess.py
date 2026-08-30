@@ -88,6 +88,22 @@ def test_perspective_rejects_oversized_output_before_warp(
         perspective_correct(source, points, output_size=(100_000, 100_000))
 
 
+def test_perspective_rejects_oversized_output_before_opencv_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = np.zeros((120, 160), dtype=np.uint8)
+    points = [(10, 10), (150, 15), (145, 110), (15, 105)]
+
+    def unexpected_opencv_call(*args: object, **kwargs: object) -> np.ndarray:
+        raise AssertionError("OpenCV allocation was attempted")
+
+    monkeypatch.setattr(cv2, "cvtColor", unexpected_opencv_call)
+    monkeypatch.setattr(cv2, "warpPerspective", unexpected_opencv_call)
+
+    with pytest.raises(PreprocessError, match="安全上限"):
+        perspective_correct(source, points, output_size=(100_000, 100_000))
+
+
 def test_perspective_rejects_enormous_integer_output_with_typed_error() -> None:
     source = np.zeros((120, 160, 3), dtype=np.uint8)
     points = [(10, 10), (150, 15), (145, 110), (15, 105)]
@@ -155,6 +171,11 @@ def test_enhancement_settings_reject_string_and_bool_coercion(
 def test_enhancement_settings_reject_malformed_grid_with_typed_error() -> None:
     with pytest.raises(PreprocessError, match="增强"):
         PreprocessSettings(clahe_tile_grid_size=8)  # type: ignore[arg-type]
+
+
+def test_enhancement_settings_directly_reject_json_style_grid_list() -> None:
+    with pytest.raises(PreprocessError, match="增强"):
+        PreprocessSettings(clahe_tile_grid_size=[8, 8])  # type: ignore[arg-type]
 
 
 def test_enhancement_settings_reject_enormous_integer_with_typed_error() -> None:

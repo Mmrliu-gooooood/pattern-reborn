@@ -70,9 +70,9 @@ def perspective_correct(
     output_size: tuple[int, int],
 ) -> np.ndarray:
     """Correct a TL, TR, BR, BL quadrilateral into the requested RGB output size."""
+    output_width, output_height = _validate_output_size(output_size)
     rgb = _as_rgb_uint8(image)
     source_points = _validate_perspective_points(points, width=rgb.shape[1], height=rgb.shape[0])
-    output_width, output_height = _validate_output_size(output_size)
     target_points = np.array(
         [
             (0, 0),

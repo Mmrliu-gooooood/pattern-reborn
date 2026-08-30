@@ -232,3 +232,110 @@ Result: exit code `0`; no whitespace errors. Git emitted only the repository's W
 ## Concerns
 
 None.
+
+## Fix round 1
+
+### Independent-review findings addressed
+
+1. Perspective output bounds are now validated before `_as_rgb_uint8(image)`, so oversized grayscale and one-channel requests cannot reach `cv2.cvtColor` or `cv2.warpPerspective`.
+2. `ExtractCommand` now accepts a JSON-style `clahe_tile_grid_size` array only when it contains exactly two plain integers, normalizes it to the tuple required by `PreprocessSettings`, and leaves range enforcement to the existing strict dataclass validation. Direct `PreprocessSettings` construction still rejects lists.
+
+### Finding 1 RED: OpenCV allocation ordering
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_preprocess.py::test_perspective_rejects_oversized_output_before_opencv_allocation -q
+```
+
+Relevant exact output:
+
+```text
+F                                                                        [100%]
+E       AssertionError: OpenCV allocation was attempted
+FAILED tests/test_preprocess.py::test_perspective_rejects_oversized_output_before_opencv_allocation
+1 failed in 0.14s
+```
+
+The failure occurred at `cv2.cvtColor` inside `_as_rgb_uint8`, before `_validate_output_size` was called.
+
+### Finding 1 GREEN
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_preprocess.py::test_perspective_rejects_oversized_output_before_opencv_allocation -q
+```
+
+Exact output:
+
+```text
+.                                                                        [100%]
+1 passed in 0.02s
+```
+
+### Finding 2 RED: JSON array normalization
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_preprocess.py::test_enhancement_settings_directly_reject_json_style_grid_list tests/test_workflow.py::test_extract_command_accepts_json_style_grid_list tests/test_workflow.py::test_extract_command_accepts_grid_array_from_json tests/test_workflow.py::test_extract_command_rejects_invalid_grid_arrays_from_json -q
+```
+
+Relevant exact output:
+
+```text
+.FF.......                                                               [100%]
+FAILED tests/test_workflow.py::test_extract_command_accepts_json_style_grid_list
+FAILED tests/test_workflow.py::test_extract_command_accepts_grid_array_from_json
+2 failed, 8 passed in 0.19s
+```
+
+Both failures were the expected `ValidationError` caused by passing the valid `[4, 6]` array directly to strict `PreprocessSettings` construction. The eight passing cases proved that direct dataclass list rejection and invalid JSON-array rejection were already strict before normalization was added.
+
+### Finding 2 GREEN
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_preprocess.py::test_enhancement_settings_directly_reject_json_style_grid_list tests/test_workflow.py::test_extract_command_accepts_json_style_grid_list tests/test_workflow.py::test_extract_command_accepts_grid_array_from_json tests/test_workflow.py::test_extract_command_rejects_invalid_grid_arrays_from_json -q
+```
+
+Exact output:
+
+```text
+..........                                                               [100%]
+10 passed in 0.05s
+```
+
+The invalid JSON arrays cover bool, float, string, one-item and three-item lengths, zero, and the excessive value `17`.
+
+### Focused covering verification
+
+Exact command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_preprocess.py tests/test_workflow.py -q
+```
+
+Exact output:
+
+```text
+..............................................................           [100%]
+62 passed in 4.14s
+```
+
+Per the fix-round instruction, the whole suite was not rerun. Both changed production paths are covered by the focused preprocessing and workflow suites.
+
+### Fix-round self-review
+
+- Allocation sentinel coverage: the new grayscale regression replaces both `cv2.cvtColor` and `cv2.warpPerspective` with failing sentinels, so either call before the bound rejection fails the test.
+- Minimal ordering change: only `_validate_output_size(output_size)` moved; valid image normalization, point validation, and perspective math are unchanged.
+- JSON compatibility: both direct command-dict construction and `model_validate_json(...)` accept `[4, 6]` and expose `(4, 6)` on `command.preprocess`.
+- Strictness: normalization requires `type(item) is int`, excluding bool and integer-like coercions; wrong lengths are rejected before conversion; zero and excessive integers are converted to a tuple and rejected by unchanged `PreprocessSettings` bounds.
+- Direct API: `PreprocessSettings(clahe_tile_grid_size=[8, 8])` remains a typed Chinese `PreprocessError`.
+- Scope: only Task 2 preprocessing/workflow code, their focused tests, and this existing report changed.
+
+### Fix-round concerns
+
+None.
