@@ -1,7 +1,9 @@
 from PIL import Image
 import pytest
+from pydantic import ValidationError
 
-from pattern_reborn.patterns import LayoutKind, PatternRequest, compose_pattern
+import pattern_reborn.patterns as patterns_module
+from pattern_reborn.patterns import LayoutKind, PatternError, PatternRequest, compose_pattern
 
 
 @pytest.fixture
@@ -40,6 +42,113 @@ def _assert_opposite_edges_match(image: Image.Image) -> None:
         assert pixels[x, 0] == pixels[x, height - 1]
     for y in range(height):
         assert pixels[0, y] == pixels[width - 1, y]
+
+
+@pytest.mark.parametrize(
+    "canvas",
+    [
+        (1_000_000_000, 1_000_000_000),
+        [256, 256],
+        (True, 256),
+    ],
+)
+def test_pattern_request_rejects_unsafe_canvas_before_allocation(canvas: object) -> None:
+    with pytest.raises(PatternError, match="画布"):
+        PatternRequest(layout=LayoutKind.MIRROR, canvas=canvas)
+
+
+@pytest.mark.parametrize("scale", ["2", float("inf"), 1e308])
+def test_pattern_request_rejects_unsafe_scale_before_transform(scale: object) -> None:
+    with pytest.raises((PatternError, ValidationError), match="缩放"):
+        PatternRequest(layout=LayoutKind.MIRROR, canvas=(256, 256), scale=scale)
+
+
+def test_compose_rejects_oversized_scaled_stamp_before_transform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    motif = Image.new("RGBA", (1_024, 1_024), (180, 40, 45, 255))
+    request = PatternRequest(layout=LayoutKind.TWO_WAY, canvas=(64, 64), scale=3.0)
+
+    def reject_transform(self: Image.Image, *args: object, **kwargs: object) -> None:
+        raise AssertionError("transform allocation was attempted")
+
+    monkeypatch.setattr(Image.Image, "transform", reject_transform)
+
+    with pytest.raises(PatternError, match="缩放图像.*安全上限"):
+        compose_pattern(motif, request)
+
+
+@pytest.mark.parametrize(
+    ("layout", "angle", "seed"),
+    [
+        (LayoutKind.TWO_WAY, 45.0, 0),
+        (LayoutKind.ROTATION, 0.0, 45),
+        (LayoutKind.RADIAL, 0.0, 45),
+    ],
+)
+def test_compose_rejects_oversized_expanded_rotation_before_rotate(
+    layout: LayoutKind,
+    angle: float,
+    seed: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    motif = Image.new("RGBA", (1_500, 1_500), (180, 40, 45, 255))
+    request = PatternRequest(layout=layout, canvas=(64, 64), angle=angle, seed=seed)
+
+    def reject_rotate(self: Image.Image, *args: object, **kwargs: object) -> None:
+        raise AssertionError("expanded rotation allocation was attempted")
+
+    monkeypatch.setattr(Image.Image, "rotate", reject_rotate)
+
+    with pytest.raises(PatternError, match="旋转图像.*安全上限"):
+        compose_pattern(motif, request)
+
+
+def test_compose_rejects_oversized_source_stamp_before_rgba_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    motif = Image.new("RGB", (2_049, 2_048), (180, 40, 45))
+    request = PatternRequest(layout=LayoutKind.TWO_WAY, canvas=(64, 64))
+
+    def reject_convert(self: Image.Image, *args: object, **kwargs: object) -> None:
+        raise AssertionError("RGBA allocation was attempted")
+
+    monkeypatch.setattr(Image.Image, "convert", reject_convert)
+
+    with pytest.raises(PatternError, match="纹样图像.*安全上限"):
+        compose_pattern(motif, request)
+
+
+@pytest.mark.parametrize(
+    ("layout", "motif_size", "unsafe_unit_size"),
+    [
+        (LayoutKind.MIRROR, (2_048, 1_025), (4_096, 1_025)),
+        (LayoutKind.FOUR_WAY, (1_025, 1_025), (2_050, 2_050)),
+    ],
+)
+def test_compose_rejects_oversized_composite_unit_before_image_new(
+    layout: LayoutKind,
+    motif_size: tuple[int, int],
+    unsafe_unit_size: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    motif = Image.new("RGBA", motif_size, (180, 40, 45, 255))
+    request = PatternRequest(layout=layout, canvas=(64, 64))
+    original_new = Image.new
+
+    def reject_unsafe_unit(
+        mode: str,
+        size: tuple[int, int],
+        color: object = 0,
+    ) -> Image.Image:
+        if size == unsafe_unit_size:
+            raise AssertionError("composite unit allocation was attempted")
+        return original_new(mode, size, color)
+
+    monkeypatch.setattr(patterns_module.Image, "new", reject_unsafe_unit)
+
+    with pytest.raises(PatternError, match="单元.*安全上限"):
+        compose_pattern(motif, request)
 
 
 @pytest.mark.parametrize("layout", list(LayoutKind))

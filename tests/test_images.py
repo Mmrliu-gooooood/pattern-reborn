@@ -1,6 +1,8 @@
 from pathlib import Path
+import struct
+import zlib
 
-from PIL import Image
+from PIL import Image, PngImagePlugin
 import pytest
 
 import pattern_reborn.images as images_module
@@ -59,6 +61,24 @@ def test_probe_turns_decompression_bomb_warning_into_typed_error(
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1)
 
     with pytest.raises(ImageValidationError, match="图像"):
+        probe_image(path)
+
+
+def test_probe_rejects_oversized_decoded_dimensions_before_pixel_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_image(tmp_path / "oversized-header.png", image_format="PNG", size=(1, 1))
+    payload = bytearray(path.read_bytes())
+    payload[16:24] = struct.pack(">II", 4_097, 4_096)
+    payload[29:33] = struct.pack(">I", zlib.crc32(payload[12:29]))
+    path.write_bytes(payload)
+
+    def reject_pixel_load(self: PngImagePlugin.PngImageFile) -> None:
+        raise AssertionError("pixel allocation was attempted")
+
+    monkeypatch.setattr(PngImagePlugin.PngImageFile, "load", reject_pixel_load)
+
+    with pytest.raises(ImageValidationError, match="安全上限"):
         probe_image(path)
 
 

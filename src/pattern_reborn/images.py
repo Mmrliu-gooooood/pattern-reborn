@@ -8,6 +8,8 @@ import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from .limits import MAX_SOURCE_PIXELS, ImageLimitError, require_bounded_size
+
 
 class ImageValidationError(ValueError):
     """图像文件不符合可安全处理的输入约束。"""
@@ -83,6 +85,16 @@ def _decode_image(path: Path) -> tuple[Image.Image, str]:
                 image_format = source.format
                 if image_format not in _SUPPORTED_FORMATS:
                     raise ImageValidationError("图像格式不受支持。")
+                try:
+                    require_bounded_size(
+                        source.width,
+                        source.height,
+                        label="源图像尺寸",
+                        max_edge=MAX_SOURCE_PIXELS,
+                        max_pixels=MAX_SOURCE_PIXELS,
+                    )
+                except ImageLimitError as error:
+                    raise ImageValidationError(str(error)) from error
                 source.load()
                 oriented = ImageOps.exif_transpose(source)
                 oriented.load()

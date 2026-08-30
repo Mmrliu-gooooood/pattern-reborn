@@ -9,6 +9,16 @@ import re
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .limits import (
+    MAX_CANVAS_EDGE,
+    MAX_CANVAS_PIXELS,
+    MAX_INTERMEDIATE_EDGE,
+    MAX_INTERMEDIATE_PIXELS,
+    ImageLimitError,
+    require_bounded_size,
+    require_scaled_size,
+)
+
 _HEX_COLOR = re.compile(r"^#[0-9A-F]{6}$")
 
 
@@ -38,22 +48,15 @@ class PatternRequest(BaseModel):
     angle: float = 0.0
     palette_substitutions: dict[str, str] = Field(default_factory=dict)
 
-    @field_validator("canvas")
+    def __init__(self, /, **data: object) -> None:
+        if "canvas" in data:
+            data["canvas"] = _require_canvas(data["canvas"])
+        super().__init__(**data)
+
+    @field_validator("canvas", mode="before")
     @classmethod
-    def require_positive_canvas(cls, value: tuple[int, int]) -> tuple[int, int]:
-        if not isinstance(value, tuple) or len(value) != 2:
-            raise PatternError("画布尺寸必须包含宽度和高度。")
-        width, height = value
-        if (
-            isinstance(width, bool)
-            or isinstance(height, bool)
-            or not isinstance(width, int)
-            or not isinstance(height, int)
-            or width <= 0
-            or height <= 0
-        ):
-            raise PatternError("画布尺寸必须为正整数。")
-        return (width, height)
+    def require_positive_canvas(cls, value: object) -> tuple[int, int]:
+        return _require_canvas(value)
 
     @field_validator("seed")
     @classmethod
@@ -69,11 +72,19 @@ class PatternRequest(BaseModel):
             raise PatternError("间距必须是非负整数。")
         return value
 
-    @field_validator("scale")
+    @field_validator("scale", mode="before")
     @classmethod
-    def require_positive_scale(cls, value: float) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
-            raise PatternError("缩放必须为正的有限数值。")
+    def require_positive_scale(cls, value: object) -> float:
+        try:
+            require_scaled_size(
+                1,
+                1,
+                value,
+                label="缩放",
+                max_pixels=MAX_INTERMEDIATE_PIXELS,
+            )
+        except ImageLimitError as error:
+            raise PatternError(str(error)) from error
         return float(value)
 
     @field_validator("angle")
@@ -96,6 +107,21 @@ class PatternRequest(BaseModel):
                 raise PatternError("调色板替换必须使用 #RRGGBB 颜色。")
             normalized[source_hex] = target_hex
         return normalized
+
+
+def _require_canvas(value: object) -> tuple[int, int]:
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise PatternError("画布尺寸必须包含宽度和高度。")
+    try:
+        return require_bounded_size(
+            value[0],
+            value[1],
+            label="画布尺寸",
+            max_edge=MAX_CANVAS_EDGE,
+            max_pixels=MAX_CANVAS_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
 
 
 def compose_pattern(motif: Image.Image, request: PatternRequest) -> Image.Image:
@@ -125,17 +151,22 @@ def compose_pattern(motif: Image.Image, request: PatternRequest) -> Image.Image:
 
 
 def _prepare_stamp(motif: Image.Image, request: PatternRequest) -> Image.Image:
+    try:
+        require_bounded_size(
+            motif.width,
+            motif.height,
+            label="纹样图像",
+            max_edge=MAX_INTERMEDIATE_EDGE,
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
     stamp = motif.convert("RGBA").copy()
     stamp = _apply_palette_substitutions(stamp, request.palette_substitutions)
     stamp = _affine_scale(stamp, request.scale)
     if request.angle == 0.0:
         return stamp
-    return stamp.rotate(
-        request.angle,
-        resample=Image.Resampling.BICUBIC,
-        expand=True,
-        fillcolor=(0, 0, 0, 0),
-    )
+    return _rotate_expanded(stamp, request.angle)
 
 
 def _apply_palette_substitutions(image: Image.Image, substitutions: dict[str, str]) -> Image.Image:
@@ -160,14 +191,77 @@ def _rgb_from_hex(value: str) -> tuple[int, int, int]:
 def _affine_scale(image: Image.Image, scale: float) -> Image.Image:
     if scale == 1.0:
         return image
-    width = max(1, round(image.width * scale))
-    height = max(1, round(image.height * scale))
+    try:
+        width, height = require_scaled_size(
+            image.width,
+            image.height,
+            scale,
+            label="缩放图像",
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
     matrix = (1.0 / scale, 0.0, 0.0, 0.0, 1.0 / scale, 0.0)
     return image.transform(
         (width, height),
         Image.Transform.AFFINE,
         matrix,
         resample=Image.Resampling.BICUBIC,
+    )
+
+
+def _rotate_expanded(image: Image.Image, angle: float) -> Image.Image:
+    width, height = _expanded_rotation_size(image.width, image.height, angle)
+    try:
+        require_bounded_size(
+            width,
+            height,
+            label="旋转图像",
+            max_edge=MAX_INTERMEDIATE_EDGE,
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
+    return image.rotate(
+        angle,
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=(0, 0, 0, 0),
+    )
+
+
+def _expanded_rotation_size(width: int, height: int, angle: float) -> tuple[int, int]:
+    normalized = angle % 360.0
+    if normalized in (0.0, 180.0):
+        return width, height
+    if normalized in (90.0, 270.0):
+        return height, width
+
+    radians = -math.radians(normalized)
+    cosine = round(math.cos(radians), 15)
+    sine = round(math.sin(radians), 15)
+    center_x = width / 2
+    center_y = height / 2
+    translate_x = cosine * -center_x + sine * -center_y + center_x
+    translate_y = -sine * -center_x + cosine * -center_y + center_y
+    corners = (
+        (0, 0),
+        (width, 0),
+        (width, height),
+        (0, height),
+    )
+    transformed = [
+        (
+            cosine * x + sine * y + translate_x,
+            -sine * x + cosine * y + translate_y,
+        )
+        for x, y in corners
+    ]
+    x_values = [point[0] for point in transformed]
+    y_values = [point[1] for point in transformed]
+    return (
+        math.ceil(max(x_values)) - math.floor(min(x_values)),
+        math.ceil(max(y_values)) - math.floor(min(y_values)),
     )
 
 
@@ -187,17 +281,37 @@ def _tile(canvas: Image.Image, stamp: Image.Image, spacing: int) -> None:
 
 
 def _compose_mirror(canvas: Image.Image, stamp: Image.Image, spacing: int) -> None:
-    unit = Image.new("RGBA", (stamp.width * 2, stamp.height), (0, 0, 0, 0))
+    unit_size = (stamp.width * 2, stamp.height)
+    try:
+        require_bounded_size(
+            *unit_size,
+            label="镜像单元",
+            max_edge=MAX_INTERMEDIATE_EDGE,
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
+    unit = Image.new("RGBA", unit_size, (0, 0, 0, 0))
     unit.alpha_composite(stamp, (0, 0))
     unit.alpha_composite(stamp.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (stamp.width, 0))
     _tile(canvas, unit, spacing)
 
 
 def _compose_four_way(canvas: Image.Image, stamp: Image.Image, spacing: int) -> None:
+    unit_size = (stamp.width * 2, stamp.height * 2)
+    try:
+        require_bounded_size(
+            *unit_size,
+            label="四向单元",
+            max_edge=MAX_INTERMEDIATE_EDGE,
+            max_pixels=MAX_INTERMEDIATE_PIXELS,
+        )
+    except ImageLimitError as error:
+        raise PatternError(str(error)) from error
     flipped_x = stamp.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     flipped_y = stamp.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     flipped_xy = flipped_x.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-    unit = Image.new("RGBA", (stamp.width * 2, stamp.height * 2), (0, 0, 0, 0))
+    unit = Image.new("RGBA", unit_size, (0, 0, 0, 0))
     unit.alpha_composite(stamp, (0, 0))
     unit.alpha_composite(flipped_x, (stamp.width, 0))
     unit.alpha_composite(flipped_y, (0, stamp.height))
@@ -226,12 +340,7 @@ def _compose_rotation(canvas: Image.Image, stamp: Image.Image, seed: int) -> Non
     center_x = canvas.width / 2
     center_y = canvas.height / 2
     for index in range(copies):
-        rotated = stamp.rotate(
-            offset + index * (360 / copies),
-            resample=Image.Resampling.BICUBIC,
-            expand=True,
-            fillcolor=(0, 0, 0, 0),
-        )
+        rotated = _rotate_expanded(stamp, offset + index * (360 / copies))
         x = round(center_x - rotated.width / 2)
         y = round(center_y - rotated.height / 2)
         canvas.alpha_composite(rotated, (x, y))
@@ -246,12 +355,7 @@ def _compose_radial(canvas: Image.Image, stamp: Image.Image, spacing: int, seed:
     for index in range(copies):
         degrees = start + index * (360 / copies)
         radians = math.radians(degrees)
-        oriented = stamp.rotate(
-            -degrees,
-            resample=Image.Resampling.BICUBIC,
-            expand=True,
-            fillcolor=(0, 0, 0, 0),
-        )
+        oriented = _rotate_expanded(stamp, -degrees)
         x = round(center_x + radius * math.cos(radians) - oriented.width / 2)
         y = round(center_y + radius * math.sin(radians) - oriented.height / 2)
         canvas.alpha_composite(oriented, (x, y))
