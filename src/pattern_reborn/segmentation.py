@@ -182,6 +182,7 @@ class OpenCvSegmenter:
         self, image: np.ndarray, profile: ProfileId, hints: SegmentHints
     ) -> SegmentResult:
         rgb = _require_rgb_uint8(image)
+        _require_segmentable_size(rgb)
         if not isinstance(profile, ProfileId):
             raise SegmentationError("提取配置无效。")
         if not isinstance(hints, SegmentHints):
@@ -243,10 +244,32 @@ class MobileSamSegmenter:
         self, image: np.ndarray, profile: ProfileId, hints: SegmentHints
     ) -> SegmentResult:
         rgb = _require_rgb_uint8(image)
+        _require_segmentable_size(rgb)
         if not isinstance(profile, ProfileId):
             raise SegmentationError("提取配置无效。")
         if not isinstance(hints, SegmentHints):
             raise SegmentationError("区域提示无效。")
+
+        roi, resolved_hints, warnings = _resolve_roi(
+            hints,
+            width=rgb.shape[1],
+            height=rgb.shape[0],
+            require_grabcut_size=False,
+        )
+        clipped_points = tuple(
+            PromptPoint(
+                *_clip_point(
+                    (point.x, point.y),
+                    width=rgb.shape[1],
+                    height=rgb.shape[0],
+                ),
+                point.keep,
+            )
+            for point in resolved_hints.points
+        )
+        if clipped_points != resolved_hints.points:
+            warnings.append("prompt_points_clipped")
+        resolved_hints = SegmentHints(box=roi, points=clipped_points)
 
         set_image = getattr(self._predictor, "set_image", None)
         predict = getattr(self._predictor, "predict", None)
@@ -255,19 +278,18 @@ class MobileSamSegmenter:
 
         set_image(rgb.copy())
         predict_kwargs: dict[str, object] = {"multimask_output": False}
-        if hints.box is not None:
-            predict_kwargs["box"] = np.asarray(hints.box, dtype=np.float32)
-        if hints.points:
+        if resolved_hints.box is not None:
+            predict_kwargs["box"] = np.asarray(resolved_hints.box, dtype=np.float32)
+        if resolved_hints.points:
             predict_kwargs["point_coords"] = np.asarray(
-                [[point.x, point.y] for point in hints.points], dtype=np.float32
+                [[point.x, point.y] for point in resolved_hints.points], dtype=np.float32
             )
             predict_kwargs["point_labels"] = np.asarray(
-                [1 if point.keep else 0 for point in hints.points], dtype=np.int32
+                [1 if point.keep else 0 for point in resolved_hints.points], dtype=np.int32
             )
 
         masks, _scores, _logits = predict(**predict_kwargs)
         final_mask = _mask_from_predictor(masks, rgb.shape[:2])
-        warnings: list[str] = []
         if not np.any(final_mask):
             warnings.append("no_foreground_detected")
 
@@ -279,7 +301,7 @@ class MobileSamSegmenter:
                 "profile_algorithm": "mobile-sam-prompted",
                 "multimask_output": False,
             },
-            hints=hints,
+            hints=resolved_hints,
             algorithm_version=MOBILE_SAM_ALGORITHM_VERSION,
             warnings=tuple(warnings),
         )
@@ -309,6 +331,18 @@ def extract_rgba(image: np.ndarray, mask: np.ndarray) -> Image.Image:
     if binary_mask.shape != rgb.shape[:2]:
         raise SegmentationError("蒙版尺寸必须与图像一致。")
     return Image.fromarray(np.dstack((rgb, binary_mask)).copy())
+
+
+def combine_with_source_alpha(mask: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    """Clear segmented pixels that were fully transparent in the source image."""
+    binary_mask = _require_binary_mask(mask)
+    source_alpha = _require_source_alpha(alpha)
+    if source_alpha.shape != binary_mask.shape:
+        raise SegmentationError("源透明度尺寸必须与蒙版一致。")
+    return np.ascontiguousarray(
+        np.where(source_alpha > 0, binary_mask, 0),
+        dtype=np.uint8,
+    )
 
 
 def filter_small_components(mask: np.ndarray, minimum_area: int) -> np.ndarray:
@@ -463,12 +497,25 @@ def _require_rgb_uint8(image: object) -> np.ndarray:
     return np.ascontiguousarray(image)
 
 
+def _require_segmentable_size(image: np.ndarray) -> None:
+    if image.shape[0] < 2 or image.shape[1] < 2:
+        raise SegmentationError("图像尺寸过小，至少需要 2×2 像素。")
+
+
 def _require_binary_mask(mask: object) -> np.ndarray:
     if not isinstance(mask, np.ndarray) or mask.dtype != np.uint8 or mask.ndim != 2:
         raise SegmentationError("蒙版必须是二值 uint8 数组。")
     if not mask.shape[0] or not mask.shape[1] or not np.isin(mask, (0, 255)).all():
         raise SegmentationError("蒙版必须只包含 0 或 255。")
     return np.ascontiguousarray(mask)
+
+
+def _require_source_alpha(alpha: object) -> np.ndarray:
+    if not isinstance(alpha, np.ndarray) or alpha.dtype != np.uint8 or alpha.ndim != 2:
+        raise SegmentationError("源透明度必须是 uint8 二维数组。")
+    if not alpha.shape[0] or not alpha.shape[1]:
+        raise SegmentationError("源透明度必须是非空 uint8 二维数组。")
+    return np.ascontiguousarray(alpha)
 
 
 def _require_integer(value: object, label: str) -> int:

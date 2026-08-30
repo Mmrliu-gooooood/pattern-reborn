@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pytest
 
+import pattern_reborn.segmentation as segmentation
 from pattern_reborn.domain import ProfileId
 from pattern_reborn.segmentation import (
     MaskEditMode,
@@ -171,6 +172,40 @@ def test_extract_rgba_preserves_source_rgb_and_uses_binary_mask_as_alpha() -> No
     assert np.array_equal(np.asarray(rgba), np.array([[[12, 34, 56, 0], [78, 90, 123, 255]]], dtype=np.uint8))
     assert np.array_equal(image, image_before)
     assert np.array_equal(mask, mask_before)
+
+
+def test_combine_with_source_alpha_clears_only_fully_transparent_pixels() -> None:
+    mask = np.array([[255, 255], [0, 255]], dtype=np.uint8)
+    alpha = np.array([[0, 1], [128, 255]], dtype=np.uint8)
+    mask_before = mask.copy()
+    alpha_before = alpha.copy()
+
+    combined = segmentation.combine_with_source_alpha(mask, alpha)
+
+    assert np.array_equal(combined, np.array([[0, 255], [0, 255]], dtype=np.uint8))
+    assert np.array_equal(mask, mask_before)
+    assert np.array_equal(alpha, alpha_before)
+
+
+@pytest.mark.parametrize(
+    "alpha",
+    [
+        np.ones((2, 2), dtype=np.int16),
+        np.ones((2, 2, 1), dtype=np.uint8),
+        np.ones((1, 2), dtype=np.uint8),
+    ],
+)
+def test_combine_with_source_alpha_rejects_invalid_alpha(alpha: np.ndarray) -> None:
+    with pytest.raises(SegmentationError, match="源透明度"):
+        segmentation.combine_with_source_alpha(np.full((2, 2), 255, dtype=np.uint8), alpha)
+
+
+@pytest.mark.parametrize("shape", [(1, 2, 3), (2, 1, 3)])
+def test_segmenter_rejects_images_smaller_than_two_by_two(shape: tuple[int, int, int]) -> None:
+    image = np.full(shape, 255, dtype=np.uint8)
+
+    with pytest.raises(SegmentationError, match="至少需要 2×2"):
+        OpenCvSegmenter().segment(image, ProfileId.SILHOUETTE, SegmentHints())
 
 
 def test_filter_small_components_discards_isolated_noise() -> None:

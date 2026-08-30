@@ -21,6 +21,12 @@ from pattern_reborn.generation.base import (
 )
 from pattern_reborn.patterns import LayoutKind, PatternRequest
 from pattern_reborn.preprocess import PreprocessSettings, enhance
+from pattern_reborn.segmentation import (
+    MaskEditMode,
+    MaskStroke,
+    SegmentResult,
+    extract_rgba,
+)
 from pattern_reborn.workflow import CreateProjectCommand, ExtractCommand, WorkflowError
 from tests.test_generation_base import make_generation_request
 
@@ -139,6 +145,60 @@ def test_extract_persists_preprocess_settings(app_service, source_fixture: Path)
         "clahe_clip_limit": 2.0,
         "clahe_tile_grid_size": [4, 4],
     }
+
+
+def test_extract_never_restores_pixels_hidden_by_source_alpha(
+    app_service,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "transparent-source.png"
+    image = Image.new("RGBA", (8, 8), (25, 50, 75, 255))
+    image.putpixel((0, 0), (125, 150, 175, 0))
+    image.save(source)
+    project = _create(app_service, source)
+
+    def return_empty_mask(image, profile, hints):
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        return SegmentResult(
+            mask=mask,
+            rgba=extract_rgba(image, mask),
+            profile=profile,
+            parameters={},
+            hints=hints,
+        )
+
+    monkeypatch.setattr(app_service._segmenter, "segment", return_empty_mask)
+
+    extraction = app_service.extract(
+        project.id,
+        ExtractCommand(
+            profile=ProfileId.SILHOUETTE,
+            strokes=[MaskStroke(MaskEditMode.KEEP, [(0, 0)], 3)],
+        ),
+    )
+
+    with Image.open(extraction.path) as extracted:
+        assert extracted.convert("RGBA").getchannel("A").getpixel((0, 0)) == 0
+        assert extracted.convert("RGBA").getpixel((0, 0))[:3] == (125, 150, 175)
+    pending = app_service.load_project(project.id).processing_parameters["pending_extraction"]
+    mask_path = app_service.repository.project_dir(project.id) / pending["mask"]
+    with Image.open(mask_path) as saved_mask:
+        assert saved_mask.convert("L").getpixel((0, 0)) == 0
+
+
+@pytest.mark.parametrize("size", [(1, 2), (2, 1), (1, 1)])
+def test_extract_rejects_images_smaller_than_two_by_two(
+    app_service,
+    tmp_path: Path,
+    size: tuple[int, int],
+) -> None:
+    source = tmp_path / f"tiny-{size[0]}x{size[1]}.png"
+    Image.new("RGB", size, (200, 100, 50)).save(source)
+    project = _create(app_service, source)
+
+    with pytest.raises(WorkflowError, match="至少需要 2×2"):
+        app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
 
 
 @pytest.mark.parametrize(

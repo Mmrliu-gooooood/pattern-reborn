@@ -10,6 +10,7 @@ from pattern_reborn.domain import ProfileId
 from pattern_reborn.segmentation import (
     MobileSamSegmenter,
     PromptPoint,
+    SegmentationError,
     SegmentHints,
     Segmenter,
 )
@@ -94,3 +95,36 @@ def test_mobile_sam_segmenter_satisfies_segmenter_protocol(
     )
     assert result.mask.shape == (48, 48)
     assert result.algorithm_version.startswith("mobile-sam")
+
+
+def test_mobile_sam_clips_box_and_points_to_image_bounds(
+    fake_predictor: FakePredictor, image: np.ndarray
+) -> None:
+    result = MobileSamSegmenter(fake_predictor).segment(
+        image,
+        ProfileId.ARTIFACT_PHOTO,
+        SegmentHints(box=(-8, -4, 999, 999), points=[PromptPoint(999, -5, True)]),
+    )
+
+    call = fake_predictor.calls[-1]
+    assert np.asarray(call["box"]).reshape(-1).tolist() == [0.0, 0.0, 48.0, 48.0]
+    assert np.asarray(call["point_coords"]).tolist() == [[47.0, 0.0]]
+    assert result.hints == SegmentHints(
+        box=(0, 0, 48, 48),
+        points=[PromptPoint(47, 0, True)],
+    )
+    assert "roi_clipped" in result.warnings
+
+
+def test_mobile_sam_rejects_box_that_clips_to_empty_roi(
+    fake_predictor: FakePredictor, image: np.ndarray
+) -> None:
+    with pytest.raises(SegmentationError, match="ROI"):
+        MobileSamSegmenter(fake_predictor).segment(
+            image,
+            ProfileId.ARTIFACT_PHOTO,
+            SegmentHints(box=(60, 4, 80, 30)),
+        )
+
+    assert fake_predictor.image is None
+    assert fake_predictor.calls == []

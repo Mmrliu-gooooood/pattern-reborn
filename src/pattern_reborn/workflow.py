@@ -48,6 +48,7 @@ from pattern_reborn.segmentation import (
     OpenCvSegmenter,
     SegmentHints,
     apply_mask_strokes,
+    combine_with_source_alpha,
     extract_rgba,
 )
 from pattern_reborn.vectorize import Vectorizer
@@ -167,13 +168,21 @@ class PatternRebornService:
         project_dir = self.repository.project_dir(project.id)
         source_path = self._resolve_artifact(project_dir, project.source.relative_path)
         working = load_working_image(source_path)
-        rgb = np.ascontiguousarray(np.asarray(working.convert("RGB")), dtype=np.uint8)
+        if working.width < 2 or working.height < 2:
+            raise WorkflowError("图像尺寸过小，至少需要 2×2 像素。")
+        source_rgba = np.ascontiguousarray(
+            np.asarray(working.convert("RGBA")),
+            dtype=np.uint8,
+        )
+        rgb = np.ascontiguousarray(source_rgba[:, :, :3])
+        source_alpha = np.ascontiguousarray(source_rgba[:, :, 3])
         processed = enhance(rgb, command.preprocess)
         hints = command.hints if command.hints is not None else SegmentHints()
         result = self._segmenter.segment(processed, command.profile, hints)
         mask = result.mask
         if command.strokes:
             mask = apply_mask_strokes(mask, command.strokes)
+        mask = combine_with_source_alpha(mask, source_alpha)
         rgba = extract_rgba(rgb, mask)
         version = _next_version(project_dir / "extracted")
         extracted_id = f"extracted/v{version}.png"
