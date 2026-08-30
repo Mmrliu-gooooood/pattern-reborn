@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -47,6 +48,7 @@ from pattern_reborn.segmentation import (
     MaskStroke,
     OpenCvSegmenter,
     SegmentHints,
+    Segmenter,
     apply_mask_strokes,
     combine_with_source_alpha,
     extract_rgba,
@@ -58,6 +60,11 @@ _PALETTE_SEED = 20260829
 
 class WorkflowError(ValueError):
     """工作流步骤无法安全完成。"""
+
+
+class SegmentationBackend(str, Enum):
+    OPENCV = "opencv"
+    MOBILE_SAM = "mobile_sam"
 
 
 class CreateProjectCommand(BaseModel):
@@ -77,6 +84,16 @@ class ExtractCommand(BaseModel):
     hints: SegmentHints | None = None
     strokes: list[MaskStroke] = Field(default_factory=list)
     preprocess: PreprocessSettings = Field(default_factory=PreprocessSettings)
+    backend: SegmentationBackend = SegmentationBackend.OPENCV
+
+    @field_validator("backend", mode="before")
+    @classmethod
+    def validate_backend(cls, value: object) -> SegmentationBackend:
+        if isinstance(value, SegmentationBackend):
+            return value
+        if type(value) is str:
+            return SegmentationBackend(value)
+        raise ValueError("分割后端无效。")
 
     @field_validator("preprocess", mode="before")
     @classmethod
@@ -117,7 +134,8 @@ class PatternRebornService:
         export_root: Path,
         mockup_catalog: dict | None = None,
         vectorizer: Vectorizer | None = None,
-        segmenter: OpenCvSegmenter | None = None,
+        segmenter: Segmenter | None = None,
+        mobile_sam_segmenter: Segmenter | None = None,
     ) -> None:
         self.repository = repository
         self._knowledge = knowledge
@@ -126,6 +144,11 @@ class PatternRebornService:
         self._mockups = mockup_catalog if mockup_catalog is not None else load_mockup_catalog()
         self._vectorizer = vectorizer if vectorizer is not None else Vectorizer()
         self._segmenter = segmenter if segmenter is not None else OpenCvSegmenter()
+        self._mobile_sam_segmenter = mobile_sam_segmenter
+
+    @property
+    def has_mobile_sam_segmenter(self) -> bool:
+        return self._mobile_sam_segmenter is not None
 
     def create_project(self, command: CreateProjectCommand) -> ProjectRecord:
         project = self.repository.create(
@@ -165,6 +188,7 @@ class PatternRebornService:
     def extract(self, project_id: str, command: ExtractCommand) -> ArtifactRef:
         project = self.repository.load(project_id)
         self._require_step(project, StepId.UPLOAD, "请先创建项目并完成上传。")
+        segmenter = self._segmenter_for(command)
         project_dir = self.repository.project_dir(project.id)
         source_path = self._resolve_artifact(project_dir, project.source.relative_path)
         working = load_working_image(source_path)
@@ -178,7 +202,7 @@ class PatternRebornService:
         source_alpha = np.ascontiguousarray(source_rgba[:, :, 3])
         processed = enhance(rgb, command.preprocess)
         hints = command.hints if command.hints is not None else SegmentHints()
-        result = self._segmenter.segment(processed, command.profile, hints)
+        result = segmenter.segment(processed, command.profile, hints)
         mask = result.mask
         if command.strokes:
             mask = apply_mask_strokes(mask, command.strokes)
@@ -197,6 +221,7 @@ class PatternRebornService:
         parameters["pending_extraction"] = {
             "artifact_id": extracted_id,
             "mask": mask_id,
+            "backend": command.backend.value,
             "algorithm_version": result.algorithm_version,
             "parameters": {
                 **result.parameters,
@@ -210,6 +235,13 @@ class PatternRebornService:
         project.updated_at = datetime.now(UTC)
         self.repository.save(project)
         return ArtifactRef(artifact_id=extracted_id, kind=ArtifactKind.EXTRACTED, path=extracted_path)
+
+    def _segmenter_for(self, command: ExtractCommand) -> Segmenter:
+        if command.backend is SegmentationBackend.MOBILE_SAM:
+            if self._mobile_sam_segmenter is None:
+                raise WorkflowError("MobileSAM 当前不可用，请改用 OpenCV。")
+            return self._mobile_sam_segmenter
+        return self._segmenter
 
     def confirm_extraction(self, project_id: str, artifact_id: str) -> ProjectRecord:
         project = self.repository.load(project_id)

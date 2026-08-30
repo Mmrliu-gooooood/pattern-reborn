@@ -128,8 +128,12 @@ def test_detect_capabilities_does_not_import_torch_or_mobile_sam(monkeypatch) ->
     assert "torch" not in sys.modules
 
 
-def test_segmentation_and_capabilities_have_no_top_level_torch_imports() -> None:
-    for path in (SRC_ROOT / "segmentation.py", SRC_ROOT / "capabilities.py"):
+def test_startup_modules_have_no_top_level_optional_model_imports() -> None:
+    for path in (
+        REPO_ROOT / "app.py",
+        SRC_ROOT / "segmentation.py",
+        SRC_ROOT / "capabilities.py",
+    ):
         imported = _top_level_imported_modules(path)
         assert imported.isdisjoint(_FORBIDDEN_TOP_LEVEL), path.name
 

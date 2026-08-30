@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from streamlit.testing.v1 import AppTest
 
@@ -140,6 +141,52 @@ def test_extraction_advanced_notes_opencv_baseline_not_mobilesam(
     text = all_text(studio_at_extraction)
     assert "OpenCV" in text
     assert "未调用 MobileSAM" in text or "OpenCV 基线" in text
+
+
+def test_extraction_fallback_hides_backend_selector_and_submits_opencv(
+    studio_at_extraction,
+    studio_workspace: Path,
+) -> None:
+    from pattern_reborn.projects import ProjectRepository
+
+    studio_at_extraction.run()
+
+    assert not studio_at_extraction.exception
+    assert not any(widget.label == "分割后端" for widget in studio_at_extraction.selectbox)
+    text = all_text(studio_at_extraction)
+    assert "OpenCV" in text
+    assert "回退" in text
+
+    next(button for button in studio_at_extraction.button if button.label == "提取").click().run()
+    assert not studio_at_extraction.exception
+    project = ProjectRepository(studio_workspace).load(
+        studio_at_extraction.session_state["project_id"]
+    )
+    pending = project.processing_parameters.get("pending_extraction")
+    assert isinstance(pending, dict)
+    assert pending["backend"] == "opencv"
+
+
+def test_extraction_shows_backend_selector_without_eager_optional_imports(
+    studio_at_extraction,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "pattern_reborn.capabilities.find_spec",
+        lambda name: object() if name == "mobile_sam" else None,
+    )
+    assert "torch" not in sys.modules
+    assert "mobile_sam" not in sys.modules
+
+    studio_at_extraction.run()
+
+    assert not studio_at_extraction.exception
+    backend = next(
+        widget for widget in studio_at_extraction.selectbox if widget.label == "分割后端"
+    )
+    assert list(backend.options) == ["OpenCV", "MobileSAM"]
+    assert "torch" not in sys.modules
+    assert "mobile_sam" not in sys.modules
 
 
 def test_backward_navigation_keeps_unsaved_generation_prompt(studio_at_generation) -> None:

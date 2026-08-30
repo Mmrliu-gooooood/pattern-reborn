@@ -4,12 +4,14 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
 from pydantic import ValidationError
 import pytest
 
+import pattern_reborn.workflow as workflow
 from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass, StepId
 from pattern_reborn.exporter import ExportSelection
 from pattern_reborn.generation.base import (
@@ -27,7 +29,12 @@ from pattern_reborn.segmentation import (
     SegmentResult,
     extract_rgba,
 )
-from pattern_reborn.workflow import CreateProjectCommand, ExtractCommand, WorkflowError
+from pattern_reborn.workflow import (
+    CreateProjectCommand,
+    ExtractCommand,
+    PatternRebornService,
+    WorkflowError,
+)
 from tests.test_generation_base import make_generation_request
 
 
@@ -45,6 +52,26 @@ def _create(app_service, source: Path, name: str = "工作流项目"):
 def _extract_and_confirm(app_service, project_id: str):
     extraction = app_service.extract(project_id, ExtractCommand(profile=ProfileId.SILHOUETTE))
     return app_service.confirm_extraction(project_id, extraction.artifact_id), extraction
+
+
+class RecordingSegmenter:
+    def __init__(self, algorithm_version: str) -> None:
+        self.algorithm_version = algorithm_version
+        self.calls = 0
+        self.last_image: np.ndarray | None = None
+
+    def segment(self, image, profile, hints) -> SegmentResult:
+        self.calls += 1
+        self.last_image = image.copy()
+        mask = np.full(image.shape[:2], 255, dtype=np.uint8)
+        return SegmentResult(
+            mask=mask,
+            rgba=extract_rgba(image, mask),
+            profile=profile,
+            parameters={"recording_segmenter": self.algorithm_version},
+            hints=hints,
+            algorithm_version=self.algorithm_version,
+        )
 
 
 def test_workflow_module_does_not_import_streamlit() -> None:
@@ -147,6 +174,54 @@ def test_extract_persists_preprocess_settings(app_service, source_fixture: Path)
     }
 
 
+def test_extract_routes_to_requested_mobile_sam_and_persists_backend(
+    app_service,
+    source_fixture: Path,
+    tmp_path: Path,
+) -> None:
+    opencv = RecordingSegmenter("opencv-recording-1.0")
+    mobile = RecordingSegmenter("mobile-sam-recording-1.0")
+    service = PatternRebornService(
+        app_service.repository,
+        knowledge=app_service._knowledge,
+        export_root=tmp_path / "outputs",
+        segmenter=opencv,
+        mobile_sam_segmenter=mobile,
+    )
+    project = _create(service, source_fixture)
+
+    service.extract(
+        project.id,
+        ExtractCommand(
+            profile=ProfileId.FLAT_COLOR,
+            backend="mobile_sam",
+        ),
+    )
+
+    assert mobile.calls == 1
+    assert opencv.calls == 0
+    pending = service.load_project(project.id).processing_parameters["pending_extraction"]
+    assert pending["backend"] == "mobile_sam"
+    assert pending["algorithm_version"] == "mobile-sam-recording-1.0"
+
+
+def test_extract_rejects_unavailable_mobile_sam_without_importing_optional_model(
+    app_service,
+    source_fixture: Path,
+) -> None:
+    project = _create(app_service, source_fixture)
+    before = set(sys.modules)
+
+    with pytest.raises(WorkflowError, match="^MobileSAM 当前不可用，请改用 OpenCV。$"):
+        app_service.extract(
+            project.id,
+            ExtractCommand(profile=ProfileId.FLAT_COLOR, backend="mobile_sam"),
+        )
+
+    imported = set(sys.modules) - before
+    assert imported.isdisjoint({"torch", "mobile_sam"})
+
+
 def test_extract_never_restores_pixels_hidden_by_source_alpha(
     app_service,
     tmp_path: Path,
@@ -241,6 +316,30 @@ def test_extract_command_accepts_grid_array_from_json() -> None:
     )
 
     assert command.preprocess.clahe_tile_grid_size == (4, 6)
+
+
+def test_extract_command_defaults_to_opencv_and_serializes_backend() -> None:
+    command = ExtractCommand(profile=ProfileId.FLAT_COLOR)
+
+    assert command.backend is workflow.SegmentationBackend.OPENCV
+    assert command.model_dump(mode="json")["backend"] == "opencv"
+
+
+def test_extract_command_accepts_mobile_sam_at_python_and_json_boundaries() -> None:
+    command = ExtractCommand(profile=ProfileId.FLAT_COLOR, backend="mobile_sam")
+    restored = ExtractCommand.model_validate_json(command.model_dump_json())
+
+    assert command.backend is workflow.SegmentationBackend.MOBILE_SAM
+    assert restored.backend is workflow.SegmentationBackend.MOBILE_SAM
+
+
+@pytest.mark.parametrize(
+    "backend",
+    ["MobileSAM", "MOBILE_SAM", "mobile-sam", "", 1, True, None],
+)
+def test_extract_command_rejects_invalid_backend_values(backend: object) -> None:
+    with pytest.raises(ValidationError):
+        ExtractCommand(profile=ProfileId.FLAT_COLOR, backend=backend)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

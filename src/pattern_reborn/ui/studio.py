@@ -27,6 +27,7 @@ from pattern_reborn.workflow import (
     CreateProjectCommand,
     ExtractCommand,
     PatternRebornService,
+    SegmentationBackend,
     WorkflowError,
 )
 
@@ -255,13 +256,23 @@ def _render_extraction(
     keep_point = st.checkbox("提示点保留", value=True)
     st.radio("笔触模式", ["保留", "删除"], key="stroke_mode", horizontal=True)
     stroke_coords = st.text_input("笔触坐标", placeholder="x,y;x,y")
+    backend = SegmentationBackend.OPENCV
     with _advanced():
         stroke_width = st.number_input("笔触宽度", min_value=1, value=3, step=1)
         profile_names = {profile.display_name_zh: profile.id for profile in knowledge.profiles}
         default_profile = knowledge.profile_for(project.category)
         profile_index = list(profile_names.values()).index(default_profile.id)
         profile_name = st.selectbox("处理档案", list(profile_names), index=profile_index)
-        st.caption("当前提取使用 OpenCV 基线；未调用 MobileSAM。框选与提示点可辅助提取。")
+        if capabilities.mobile_sam.available and service.has_mobile_sam_segmenter:
+            backend_labels = {
+                "OpenCV": SegmentationBackend.OPENCV,
+                "MobileSAM": SegmentationBackend.MOBILE_SAM,
+            }
+            backend_name = st.selectbox("分割后端", list(backend_labels))
+            backend = backend_labels[backend_name]
+            st.caption("可选择 OpenCV 基线或 MobileSAM 引导式分割。")
+        else:
+            st.caption("MobileSAM 当前不可用，已回退为 OpenCV 基线。框选与提示点可辅助提取。")
     if canvas is not None:
         st.caption("画布工具：点选、框选、保留笔刷、删除笔刷。")
     if st.button("添加笔触") and stroke_coords.strip():
@@ -287,6 +298,7 @@ def _render_extraction(
                 project.id,
                 ExtractCommand(
                     profile=profile_names[profile_name],
+                    backend=backend,
                     hints=SegmentHints(box=box, points=points),
                     strokes=strokes,
                 ),
