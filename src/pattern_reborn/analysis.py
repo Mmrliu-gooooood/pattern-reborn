@@ -198,13 +198,14 @@ def analyze_contours(mask: np.ndarray) -> ContourReport:
 
 
 def analyze_symmetry(mask: np.ndarray) -> SymmetryReport:
-    """Compare centered foreground IoU against flips and five NN rotations."""
+    """Compare foreground IoU against bilateral flips and five NN rotations."""
     binary_mask = _require_binary_mask(mask)
     if not np.any(binary_mask):
         raise AnalysisError("蒙版不包含可分析的前景。")
-    centered = _center_foreground(binary_mask)
-    vertical_score = _iou(centered, np.fliplr(centered))
-    horizontal_score = _iou(centered, np.flipud(centered))
+    foreground = _foreground_crop(binary_mask)
+    vertical_score = _iou(foreground, np.fliplr(foreground))
+    horizontal_score = _iou(foreground, np.flipud(foreground))
+    centered = _center_foreground(foreground)
     rotations = tuple(
         sorted(
             (
@@ -275,15 +276,19 @@ def _rgb_to_cie_lab(rgb: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(normalized, cv2.COLOR_RGB2LAB).reshape((-1, 3))
 
 
-def _center_foreground(mask: np.ndarray) -> np.ndarray:
+def _center_foreground(foreground: np.ndarray) -> np.ndarray:
+    side = max(foreground.shape)
+    pad_y = side - foreground.shape[0]
+    pad_x = side - foreground.shape[1]
+    return np.pad(
+        foreground,
+        ((pad_y // 2, pad_y - pad_y // 2), (pad_x // 2, pad_x - pad_x // 2)),
+    )
+
+
+def _foreground_crop(mask: np.ndarray) -> np.ndarray:
     rows, columns = np.nonzero(mask)
-    cropped = (mask[rows.min() : rows.max() + 1, columns.min() : columns.max() + 1] != 0)
-    side = max(cropped.shape)
-    top = (side - cropped.shape[0]) // 2
-    left = (side - cropped.shape[1]) // 2
-    centered = np.zeros((side, side), dtype=bool)
-    centered[top : top + cropped.shape[0], left : left + cropped.shape[1]] = cropped
-    return centered
+    return mask[rows.min() : rows.max() + 1, columns.min() : columns.max() + 1] != 0
 
 
 def _rotate_nearest(mask: np.ndarray, angle: float) -> np.ndarray:

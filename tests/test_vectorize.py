@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pattern_reborn.vectorize import Vectorizer, VectorSettings, find_vtracer
+from pattern_reborn.vectorize import VectorizeError, Vectorizer, VectorSettings, find_vtracer
 from tests.fixtures.images import write_image
 
 
@@ -41,6 +41,29 @@ def test_vectorizer_capability_reports_unavailable_when_missing(monkeypatch) -> 
     status = Vectorizer().capability()
     assert status.available is False
     _assert_unavailable_reason(status.reason_zh)
+
+
+def test_vectorize_rejects_destination_aliasing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = write_image(tmp_path / "motif.png", image_format="PNG", size=(8, 8))
+    destination = tmp_path / "nested" / ".." / source.name
+    before = source.read_bytes()
+
+    class Present:
+        @staticmethod
+        def convert_image_to_svg_py(image_path: str, out_path: str, **kwargs: object) -> None:
+            Path(out_path).write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("pattern_reborn.vectorize.find_vtracer", lambda: Present)
+
+    with pytest.raises(VectorizeError, match="不能覆盖"):
+        Vectorizer().vectorize(source, destination)
+
+    assert source.read_bytes() == before
 
 
 def test_successful_vectorize_writes_svg_atomically_without_mutating_png(

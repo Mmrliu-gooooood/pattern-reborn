@@ -72,11 +72,15 @@ class Vectorizer:
         destination_svg: Path,
         settings: VectorSettings = VectorSettings(),
     ) -> VectorResult:
+        source = Path(source_png)
+        destination = Path(destination_svg)
+        if source.resolve() == destination.resolve():
+            raise VectorizeError("SVG 目标路径不能覆盖源 PNG。")
+
         module = find_vtracer()
         if module is None:
             return VectorResult(available=False, reason_zh=_UNAVAILABLE_ZH)
 
-        destination = Path(destination_svg)
         temporary = destination.parent / f".{destination.name}.{uuid4().hex}.tmp"
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)

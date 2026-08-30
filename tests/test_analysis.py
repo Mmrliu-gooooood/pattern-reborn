@@ -143,6 +143,15 @@ def test_symmetry_centers_foreground_before_flip_and_sorts_all_rotation_orders(
     assert np.array_equal(translated, before)
 
 
+def test_symmetry_is_perfect_for_mixed_parity_rectangle() -> None:
+    mask = np.full((2, 3), 255, dtype=np.uint8)
+
+    report = analyze_symmetry(mask)
+
+    assert report.horizontal_score == pytest.approx(1.0)
+    assert report.vertical_score == pytest.approx(1.0)
+
+
 def test_symmetry_rejects_an_empty_mask_with_typed_error() -> None:
     with pytest.raises(AnalysisError, match="前景"):
         analyze_symmetry(np.zeros((3, 3), dtype=np.uint8))
