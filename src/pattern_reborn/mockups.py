@@ -5,13 +5,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import shutil
 from typing import Sequence
+from uuid import uuid4
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from pattern_reborn.images import save_png_atomic
+from pattern_reborn.images import ImageValidationError, load_safe_image, save_png_atomic
 
 
 class MockupError(ValueError):
@@ -103,19 +106,11 @@ def compose_mockup(
     options: MockupOptions = MockupOptions(),
 ) -> MockupResult:
     _ = options
-    try:
-        with Image.open(template.path) as source:
-            canvas = source.convert("RGBA")
-    except (OSError, ValueError) as error:
-        raise MockupError("贴图模板无法打开。") from error
+    canvas = _load_mockup_image(template.path, label="贴图模板").convert("RGBA")
     if canvas.size != template.canvas_size:
         raise MockupError("贴图模板尺寸与元数据不一致。")
 
-    try:
-        with Image.open(artwork.path) as source:
-            motif = source.convert("RGBA")
-    except (OSError, ValueError) as error:
-        raise MockupError("贴图纹样无法打开。") from error
+    motif = _load_mockup_image(artwork.path, label="贴图纹样").convert("RGBA")
 
     warped = _warp_artwork(motif, template.placement_polygon, template.canvas_size)
     composed = Image.alpha_composite(canvas, warped)
@@ -123,15 +118,45 @@ def compose_mockup(
 
 
 def save_composed_mockup(result: MockupResult, destination: Path) -> None:
+    save_mockup_bundle_atomic(result, destination)
+
+
+def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
+    """Publish a mockup PNG and provenance sidecar as a recoverable pair."""
     dest = Path(destination)
-    save_png_atomic(result.image, dest)
     sidecar = dest.with_suffix(".json")
     payload = {"ai_assisted": bool(result.ai_assisted)}
-    sidecar.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    transaction: Path | None = None
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _recover_interrupted_mockup_transactions(dest)
+        transaction = dest.parent / f".{dest.stem}.{uuid4().hex}.mockup-txn"
+        transaction.mkdir()
+        previous = {
+            "png": dest.exists(),
+            "json": sidecar.exists(),
+        }
+        _write_transaction_journal(transaction, dest, previous, state="preparing")
+        _copy_previous_file(dest, transaction / "previous.png", previous["png"])
+        _copy_previous_file(sidecar, transaction / "previous.json", previous["json"])
+        _write_staged_png(result.image, transaction / "staged.png")
+        _write_staged_json(transaction / "staged.json", payload)
+        _write_transaction_journal(transaction, dest, previous, state="prepared")
+
+        os.replace(transaction / "staged.png", dest)
+        _write_transaction_journal(transaction, dest, previous, state="png_published")
+        os.replace(transaction / "staged.json", sidecar)
+        _write_transaction_journal(transaction, dest, previous, state="committed")
+    except (ImageValidationError, OSError, ValueError, TypeError) as error:
+        if transaction is not None:
+            try:
+                _restore_mockup_pair(transaction, dest, sidecar)
+            except OSError:
+                pass
+        raise MockupError("贴图保存失败，已尝试恢复原有文件。") from error
+    else:
+        if transaction is not None:
+            _discard_transaction(transaction)
 
 
 def _template_from_metadata(root: Path, record: object) -> MockupTemplate:
@@ -158,9 +183,9 @@ def _template_from_metadata(root: Path, record: object) -> MockupTemplate:
     path = root / filename
     if path.name != f"{template_id}.png" or not path.is_file():
         raise MockupError("贴图模板文件缺失或文件名不匹配。")
-    with Image.open(path) as image:
-        if image.size != (int(dimensions[0]), int(dimensions[1])):
-            raise MockupError("贴图模板尺寸与元数据不一致。")
+    image = _load_mockup_image(path, label="贴图模板")
+    if image.size != (int(dimensions[0]), int(dimensions[1])):
+        raise MockupError("贴图模板尺寸与元数据不一致。")
     return MockupTemplate(
         id=template_id,
         path=path,
@@ -189,6 +214,121 @@ def _is_polygon(value: object) -> bool:
         if any(isinstance(item, bool) or not isinstance(item, int) for item in point):
             return False
     return True
+
+
+def _load_mockup_image(path: Path, *, label: str) -> Image.Image:
+    try:
+        return load_safe_image(path)
+    except ImageValidationError as error:
+        raise MockupError(f"{label}图像无法安全解码或格式、尺寸无效。") from error
+
+
+def _write_staged_png(image: Image.Image, path: Path) -> None:
+    if not isinstance(image, Image.Image):
+        raise ImageValidationError("待保存的图像无效。")
+    with path.open("xb") as handle:
+        image.save(handle, format="PNG")
+        handle.flush()
+        _flush_to_disk(handle)
+
+
+def _write_staged_json(path: Path, payload: dict[str, bool]) -> None:
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    with path.open("xb") as handle:
+        handle.write(encoded)
+        handle.flush()
+        _flush_to_disk(handle)
+
+
+def _write_transaction_journal(
+    transaction: Path,
+    destination: Path,
+    previous: dict[str, bool],
+    *,
+    state: str,
+) -> None:
+    journal = transaction / "journal.json"
+    payload = {
+        "destination": destination.name,
+        "sidecar": destination.with_suffix(".json").name,
+        "previous": previous,
+        "state": state,
+    }
+    with journal.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        _flush_to_disk(handle)
+
+
+def _copy_previous_file(source: Path, backup: Path, exists: bool) -> None:
+    if exists:
+        shutil.copyfile(source, backup)
+
+
+def _recover_interrupted_mockup_transactions(destination: Path) -> None:
+    for transaction in destination.parent.glob(f".{destination.stem}.*.mockup-txn"):
+        if not transaction.is_dir():
+            continue
+        try:
+            journal = _read_transaction_journal(transaction, destination)
+            if journal["state"] in {"prepared", "png_published"}:
+                _restore_mockup_pair(transaction, destination, destination.with_suffix(".json"), journal)
+            _discard_transaction(transaction)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+            raise MockupError("检测到无法安全恢复的贴图发布事务。")
+
+
+def _restore_mockup_pair(
+    transaction: Path,
+    destination: Path,
+    sidecar: Path,
+    journal: dict[str, object] | None = None,
+) -> None:
+    record = journal if journal is not None else _read_transaction_journal(transaction, destination)
+    previous = record["previous"]
+    if not isinstance(previous, dict):
+        raise OSError("mockup transaction journal is invalid")
+    _restore_previous_file(transaction / "previous.png", destination, previous.get("png"))
+    _restore_previous_file(transaction / "previous.json", sidecar, previous.get("json"))
+    _discard_transaction(transaction)
+
+
+def _read_transaction_journal(transaction: Path, destination: Path) -> dict[str, object]:
+    payload = json.loads((transaction / "journal.json").read_text(encoding="utf-8"))
+    if (
+        not isinstance(payload, dict)
+        or payload.get("destination") != destination.name
+        or payload.get("sidecar") != destination.with_suffix(".json").name
+        or payload.get("state") not in {"preparing", "prepared", "png_published", "committed"}
+    ):
+        raise OSError("mockup transaction journal is invalid")
+    return payload
+
+
+def _restore_previous_file(backup: Path, destination: Path, existed: object) -> None:
+    if existed is True:
+        restoration = backup.parent / f".{backup.name}.{uuid4().hex}.restore"
+        try:
+            shutil.copyfile(backup, restoration)
+            os.replace(restoration, destination)
+        finally:
+            restoration.unlink(missing_ok=True)
+    elif existed is False:
+        destination.unlink(missing_ok=True)
+    else:
+        raise OSError("mockup transaction journal is invalid")
+
+
+def _discard_transaction(transaction: Path) -> None:
+    shutil.rmtree(transaction, ignore_errors=True)
+
+
+def _flush_to_disk(handle: object) -> None:
+    try:
+        os.fsync(handle.fileno())  # type: ignore[attr-defined]
+    except OSError:
+        pass
 
 
 def _warp_artwork(

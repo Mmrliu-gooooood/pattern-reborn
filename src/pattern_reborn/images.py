@@ -37,12 +37,18 @@ def probe_image(path: Path) -> ImageInfo:
     )
 
 
+def load_safe_image(path: Path) -> Image.Image:
+    """Return a detached image after safe decoding and shared size validation."""
+    image, _ = _decode_image(path)
+    return image
+
+
 def load_working_image(path: Path, max_edge: int = 2048) -> Image.Image:
     """Return a detached, orientation-corrected working image without editing the source."""
     if isinstance(max_edge, bool) or not isinstance(max_edge, int) or max_edge <= 0:
         raise ImageValidationError("图像最大边长必须为正整数。")
 
-    image, _ = _decode_image(path)
+    image = load_safe_image(path)
     if max(image.size) <= max_edge:
         return image.copy()
 

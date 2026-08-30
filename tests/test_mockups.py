@@ -5,8 +5,10 @@ from pathlib import Path
 from PIL import Image
 import pytest
 
+import pattern_reborn.images as images_module
 from pattern_reborn.mockups import (
     ArtworkRef,
+    MockupError,
     MockupOptions,
     compose_mockup,
     load_mockup_catalog,
@@ -100,3 +102,119 @@ def test_compose_persists_non_ai_provenance_sidecar(mockup_catalog, tmp_path: Pa
 
     sidecar = json.loads(destination.with_suffix(".json").read_text(encoding="utf-8"))
     assert sidecar["ai_assisted"] is False
+
+
+def test_compose_mockup_rejects_decompression_bomb_as_typed_chinese_error(
+    mockup_catalog, ai_pattern: ArtworkRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a direct Pillow decode that leaks a decompression-bomb error."""
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 4)
+
+    with pytest.raises(MockupError, match="图像"):
+        compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+
+
+@pytest.mark.parametrize("has_previous_pair", [False, True])
+def test_save_composed_mockup_restores_the_previous_pair_when_json_replace_fails(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    has_previous_pair: bool,
+) -> None:
+    """Catches a partial publication when only the sidecar replacement fails."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    sidecar = destination.with_suffix(".json")
+    old_png = b"old png"
+    old_json = b'{"ai_assisted": false}\n'
+    if has_previous_pair:
+        destination.write_bytes(old_png)
+        sidecar.write_bytes(old_json)
+
+    real_replace = images_module.os.replace
+    calls = 0
+
+    def fail_on_second_replace(source: object, target: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise PermissionError("sidecar replace denied")
+        real_replace(source, target)
+
+    monkeypatch.setattr(images_module.os, "replace", fail_on_second_replace)
+
+    with pytest.raises(MockupError, match="保存"):
+        save_composed_mockup(result, destination)
+
+    if has_previous_pair:
+        assert destination.read_bytes() == old_png
+        assert sidecar.read_bytes() == old_json
+    else:
+        assert not destination.exists()
+        assert not sidecar.exists()
+
+
+def test_save_composed_mockup_discards_an_interrupted_preparation_before_publishing(
+    mockup_catalog, ai_pattern: ArtworkRef, tmp_path: Path
+) -> None:
+    """Catches recovery treating an unpublished transaction as a partial publish."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    sidecar = destination.with_suffix(".json")
+    destination.write_bytes(b"old png")
+    sidecar.write_text('{"ai_assisted": false}\n', encoding="utf-8")
+    interrupted = tmp_path / ".bookmark.interrupted.mockup-txn"
+    interrupted.mkdir()
+    (interrupted / "journal.json").write_text(
+        json.dumps(
+            {
+                "destination": destination.name,
+                "sidecar": sidecar.name,
+                "previous": {"png": True, "json": True},
+                "state": "preparing",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    save_composed_mockup(result, destination)
+
+    with Image.open(destination) as saved:
+        assert saved.size == result.image.size
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == {"ai_assisted": True}
+    assert not interrupted.exists()
+
+
+def test_save_composed_mockup_can_retry_recovery_after_the_second_rollback_fails(
+    mockup_catalog,
+    ai_pattern: ArtworkRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches rollback moving the only PNG backup before the JSON rollback fails."""
+    result = compose_mockup(mockup_catalog["bookmark"], ai_pattern)
+    destination = tmp_path / "bookmark.png"
+    sidecar = destination.with_suffix(".json")
+    destination.write_bytes(b"old png")
+    sidecar.write_bytes(b'{"ai_assisted": false}\n')
+    real_replace = images_module.os.replace
+    calls = 0
+
+    def fail_sidecar_publish_and_json_rollback(source: object, target: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls in {2, 4}:
+            raise PermissionError("replace denied")
+        real_replace(source, target)
+
+    monkeypatch.setattr(images_module.os, "replace", fail_sidecar_publish_and_json_rollback)
+    with pytest.raises(MockupError, match="保存"):
+        save_composed_mockup(result, destination)
+
+    monkeypatch.setattr(images_module.os, "replace", real_replace)
+    save_composed_mockup(result, destination)
+
+    with Image.open(destination) as saved:
+        assert saved.size == result.image.size
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == {"ai_assisted": True}
