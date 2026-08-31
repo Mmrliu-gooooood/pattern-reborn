@@ -40,7 +40,13 @@ from pattern_reborn.generation.base import CredentialMode, GenerationRequest
 from pattern_reborn.generation.service import GenerationResult, GenerationService
 from pattern_reborn.images import load_working_image, save_png_atomic
 from pattern_reborn.knowledge import KnowledgeCatalog
-from pattern_reborn.mockups import ArtworkRef, compose_mockup, load_mockup_catalog, save_composed_mockup
+from pattern_reborn.mockups import (
+    ArtworkRef,
+    compose_mockup,
+    load_mockup_catalog,
+    mockup_publication_lock,
+    save_composed_mockup,
+)
 from pattern_reborn.patterns import PatternRequest, compose_pattern
 from pattern_reborn.preprocess import PreprocessError, PreprocessSettings, enhance
 from pattern_reborn.projects import ProjectRepository
@@ -406,42 +412,43 @@ class PatternRebornService:
         return result.model_copy(update={"local_files": stored_files})
 
     def make_mockup(self, project_id: str, template_id: str, artwork_id: str) -> ArtifactRef:
-        project = self.repository.load(project_id)
-        project_dir = self.repository.project_dir(project.id)
-        artwork_path = self._resolve_artifact(project_dir, artwork_id)
-        if not artwork_path.is_file():
-            raise WorkflowError("贴图纹样不存在。")
-        if artwork_id not in _current_mockup_artwork_ids(project):
-            raise WorkflowError("贴图纹样不是当前确认的重组或生成结果。")
-        template = self._mockups.get(template_id)
-        if template is None:
-            raise WorkflowError("贴图模板不存在。")
-        ai_assisted = artwork_id in project.artifacts.generation or any(
-            record.artifact_path == artwork_id for record in project.generations
-            if record.artifact_path not in project.stale_artifacts
-        )
-        composed = compose_mockup(template, ArtworkRef(path=artwork_path, ai_assisted=ai_assisted))
-        version = _next_prefixed_version(project_dir / "mockups", template_id)
-        mockup_id = f"mockups/{template_id}-v{version}.png"
-        mockup_path = self._resolve_artifact(project_dir, mockup_id)
-        save_composed_mockup(composed, mockup_path)
-        parameters = dict(project.processing_parameters)
-        parameters["current_step"] = StepId.EXPORT.value
-        parameters["mockup"] = {"template_id": template_id, "artwork_id": artwork_id, "artifact_id": mockup_id}
-        raw_mockups = parameters.get("current_mockups")
-        current_mockups = (
-            [path for path in raw_mockups if isinstance(path, str)]
-            if isinstance(raw_mockups, list)
-            else []
-        )
-        if mockup_id not in current_mockups:
-            current_mockups.append(mockup_id)
-        parameters["current_mockups"] = current_mockups
-        project.processing_parameters = parameters
-        project.updated_at = datetime.now(UTC)
-        self.repository.save(project)
+        project_dir = self.repository.project_dir(project_id)
+        lock_destination = self._resolve_artifact(project_dir, f"mockups/{template_id}.png")
+        with mockup_publication_lock(lock_destination):
+            project = self.repository.load(project_id)
+            artwork_path = self._resolve_artifact(project_dir, artwork_id)
+            if not artwork_path.is_file():
+                raise WorkflowError("贴图纹样不存在。")
+            if artwork_id not in _current_mockup_artwork_ids(project):
+                raise WorkflowError("贴图纹样不是当前确认的重组或生成结果。")
+            template = self._mockups.get(template_id)
+            if template is None:
+                raise WorkflowError("贴图模板不存在。")
+            ai_assisted = artwork_id in project.artifacts.generation or any(
+                record.artifact_path == artwork_id for record in project.generations
+                if record.artifact_path not in project.stale_artifacts
+            )
+            composed = compose_mockup(template, ArtworkRef(path=artwork_path, ai_assisted=ai_assisted))
+            version = _next_prefixed_version(project_dir / "mockups", template_id)
+            mockup_id = f"mockups/{template_id}-v{version}.png"
+            mockup_path = self._resolve_artifact(project_dir, mockup_id)
+            save_composed_mockup(composed, mockup_path)
+            parameters = dict(project.processing_parameters)
+            parameters["current_step"] = StepId.EXPORT.value
+            parameters["mockup"] = {"template_id": template_id, "artwork_id": artwork_id, "artifact_id": mockup_id}
+            raw_mockups = parameters.get("current_mockups")
+            current_mockups = (
+                [path for path in raw_mockups if isinstance(path, str)]
+                if isinstance(raw_mockups, list)
+                else []
+            )
+            if mockup_id not in current_mockups:
+                current_mockups.append(mockup_id)
+            parameters["current_mockups"] = current_mockups
+            project.processing_parameters = parameters
+            project.updated_at = datetime.now(UTC)
+            self.repository.save(project)
         return ArtifactRef(artifact_id=mockup_id, kind=ArtifactKind.MOCKUP, path=mockup_path)
-
     def export(self, project_id: str, selection: ExportSelection) -> Path:
         project = self.repository.load(project_id)
         project_dir = self.repository.project_dir(project.id)

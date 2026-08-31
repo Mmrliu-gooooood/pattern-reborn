@@ -5,6 +5,8 @@ import ast
 import json
 from pathlib import Path
 import sys
+import threading
+import time
 
 import numpy as np
 from PIL import Image
@@ -578,3 +580,57 @@ def test_reconfirm_extraction_does_not_export_stale_mockups(
     assert not any(path.read_bytes() == mockup_bytes for path in package.rglob("*.png"))
     if mockups_dir.exists():
         assert not any(path.suffix.lower() == ".json" for path in mockups_dir.rglob("*"))
+
+
+def test_make_mockup_serializes_same_template_versions_and_metadata(
+    app_service, source_fixture: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _create(app_service, source_fixture)
+    _extract_and_confirm(app_service, project.id)
+    app_service.analyze(project.id)
+    pattern = app_service.compose(
+        project.id,
+        PatternRequest(layout=LayoutKind.RADIAL, canvas=(128, 128), seed=7),
+    )
+    first_publish_started = threading.Event()
+    allow_first_publish = threading.Event()
+    second_publish_started = threading.Event()
+    real_save = workflow.save_composed_mockup
+    failures: list[BaseException] = []
+    results = []
+
+    def pause_first_publish(result, destination: Path) -> None:
+        if threading.current_thread().name == "first-mockup":
+            first_publish_started.set()
+            assert allow_first_publish.wait(timeout=2)
+        else:
+            second_publish_started.set()
+        real_save(result, destination)
+
+    monkeypatch.setattr(workflow, "save_composed_mockup", pause_first_publish)
+
+    def make_mockup() -> None:
+        try:
+            results.append(app_service.make_mockup(project.id, "bookmark", pattern.artifact_id))
+        except BaseException as error:  # pragma: no cover - asserted below
+            failures.append(error)
+
+    first = threading.Thread(target=make_mockup, name="first-mockup")
+    second = threading.Thread(target=make_mockup, name="second-mockup")
+    first.start()
+    assert first_publish_started.wait(timeout=2)
+    second.start()
+    time.sleep(0.1)
+    assert not second_publish_started.is_set()
+    allow_first_publish.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert failures == []
+    assert {result.artifact_id for result in results} == {"mockups/bookmark-v1.png", "mockups/bookmark-v2.png"}
+    project_after = app_service.load_project(project.id)
+    assert set(project_after.processing_parameters["current_mockups"]) == {
+        "mockups/bookmark-v1.png",
+        "mockups/bookmark-v2.png",
+    }

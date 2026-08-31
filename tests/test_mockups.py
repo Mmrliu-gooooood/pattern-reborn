@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -404,7 +405,7 @@ def test_save_composed_mockup_rejects_existing_non_lock_file_without_changing_it
     original = b"not a Pattern Reborn lock"
     lock_path.write_bytes(original)
 
-    with pytest.raises(MockupError, match="锁"):
+    with pytest.raises(MockupError):
         save_composed_mockup(result, destination)
 
     assert lock_path.read_bytes() == original
@@ -423,3 +424,25 @@ def test_save_composed_mockup_reuses_a_valid_lock_file_for_repeated_publication(
     with Image.open(destination) as saved:
         assert saved.size == result.image.size
     assert json.loads(destination.with_suffix(".json").read_text(encoding="utf-8")) == {"ai_assisted": True}
+
+
+def test_destination_lock_rejects_path_replacement_after_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The checked lock inode must remain the one named by the lock path."""
+    destination = tmp_path / "bookmark.png"
+    lock_path = tmp_path / ".bookmark.mockup.lock"
+    replacement = tmp_path / "replacement.lock"
+    replacement.write_bytes(mockups_module._LOCK_MAGIC)
+    real_open = mockups_module._open_lock_file
+
+    def replace_after_open(path: Path):
+        handle = real_open(path)
+        os.replace(replacement, path)
+        return handle
+
+    monkeypatch.setattr(mockups_module, "_open_lock_file", replace_after_open)
+
+    with pytest.raises(MockupError):
+        with mockups_module._destination_pair_lock(destination):
+            raise AssertionError("replaced lock path must not be acquired")

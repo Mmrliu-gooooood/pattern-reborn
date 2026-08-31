@@ -132,6 +132,19 @@ def save_composed_mockup(result: MockupResult, destination: Path) -> None:
     save_mockup_bundle_atomic(result, destination)
 
 
+@contextmanager
+def mockup_publication_lock(destination: Path):
+    """Serialize work that allocates and publishes a mockup destination."""
+    dest = Path(destination)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with _destination_pair_lock(dest):
+            yield
+    except MockupError:
+        raise
+    except OSError as error:
+        raise MockupError("贴图发布锁无法创建或访问。") from error
+
 def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
     """Publish a mockup PNG and provenance sidecar as a recoverable pair."""
     dest = Path(destination)
@@ -367,7 +380,7 @@ def _destination_pair_lock(destination: Path):
     while handle is None:
         try:
             _ensure_safe_lock_file(lock_path)
-            candidate = lock_path.open("rb")
+            candidate = _open_lock_file(lock_path)
             try:
                 _validate_open_lock_file(lock_path, candidate)
                 _lock_file(candidate)
@@ -409,12 +422,27 @@ def _ensure_safe_lock_file(lock_path: Path) -> None:
     _validate_lock_metadata(lock_path, metadata)
 
 
+def _open_lock_file(lock_path: Path):
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
+    descriptor = os.open(lock_path, flags)
+    return os.fdopen(descriptor, "rb")
+
+
 def _validate_open_lock_file(lock_path: Path, handle: object) -> None:
-    _validate_lock_metadata(lock_path, os.lstat(lock_path))
     metadata = os.fstat(handle.fileno())  # type: ignore[attr-defined]
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_size != len(_LOCK_MAGIC)
+    ):
         raise MockupError("贴图发布锁文件无效。")
     if handle.read() != _LOCK_MAGIC:  # type: ignore[attr-defined]
+        raise MockupError("贴图发布锁文件无效。")
+    path_metadata = os.lstat(lock_path)
+    if _is_reparse_point(lock_path) or not os.path.samestat(path_metadata, metadata):
         raise MockupError("贴图发布锁文件无效。")
 
 
