@@ -145,6 +145,20 @@ def mockup_publication_lock(destination: Path):
     except OSError as error:
         raise MockupError("贴图发布锁无法创建或访问。") from error
 
+
+@contextmanager
+def mockup_project_publication_lock(project_dir: Path):
+    """Serialize all mockup publications that update one project's metadata."""
+    directory = Path(project_dir)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with _destination_pair_lock(directory / ".mockup-project.png"):
+            yield
+    except MockupError:
+        raise
+    except OSError as error:
+        raise MockupError("贴图项目发布锁无法创建或访问。") from error
+
 def save_mockup_bundle_atomic(result: MockupResult, destination: Path) -> None:
     """Publish a mockup PNG and provenance sidecar as a recoverable pair."""
     dest = Path(destination)
@@ -382,8 +396,11 @@ def _destination_pair_lock(destination: Path):
             _ensure_safe_lock_file(lock_path)
             candidate = _open_lock_file(lock_path)
             try:
-                _validate_open_lock_file(lock_path, candidate)
                 _lock_file(candidate)
+                # Lock the opened file before comparing it with the path.  If
+                # validation came first, a rename between that check and the
+                # lock could leave two publishers holding different inodes.
+                _validate_open_lock_file(lock_path, candidate)
             except OSError:
                 candidate.close()
                 if time.monotonic() >= deadline:

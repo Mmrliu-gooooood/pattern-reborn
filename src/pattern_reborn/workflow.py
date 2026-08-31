@@ -44,7 +44,7 @@ from pattern_reborn.mockups import (
     ArtworkRef,
     compose_mockup,
     load_mockup_catalog,
-    mockup_publication_lock,
+    mockup_project_publication_lock,
     save_composed_mockup,
 )
 from pattern_reborn.patterns import PatternRequest, compose_pattern
@@ -413,8 +413,7 @@ class PatternRebornService:
 
     def make_mockup(self, project_id: str, template_id: str, artwork_id: str) -> ArtifactRef:
         project_dir = self.repository.project_dir(project_id)
-        lock_destination = self._resolve_artifact(project_dir, f"mockups/{template_id}.png")
-        with mockup_publication_lock(lock_destination):
+        with mockup_project_publication_lock(project_dir):
             project = self.repository.load(project_id)
             artwork_path = self._resolve_artifact(project_dir, artwork_id)
             if not artwork_path.is_file():

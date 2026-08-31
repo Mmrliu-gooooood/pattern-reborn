@@ -446,3 +446,24 @@ def test_destination_lock_rejects_path_replacement_after_open(
     with pytest.raises(MockupError):
         with mockups_module._destination_pair_lock(destination):
             raise AssertionError("replaced lock path must not be acquired")
+
+
+def test_destination_lock_rejects_path_replacement_between_validation_and_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The named lock must still be the locked descriptor after acquisition."""
+    destination = tmp_path / "bookmark.png"
+    lock_path = tmp_path / ".bookmark.mockup.lock"
+    replacement = tmp_path / "replacement.lock"
+    replacement.write_bytes(mockups_module._LOCK_MAGIC)
+    real_lock = mockups_module._lock_file
+
+    def replace_before_lock(handle: object) -> None:
+        os.replace(replacement, lock_path)
+        real_lock(handle)
+
+    monkeypatch.setattr(mockups_module, "_lock_file", replace_before_lock)
+
+    with pytest.raises(MockupError):
+        with mockups_module._destination_pair_lock(destination):
+            raise AssertionError("replaced lock path must not be acquired")
