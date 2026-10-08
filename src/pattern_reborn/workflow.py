@@ -47,7 +47,7 @@ from pattern_reborn.mockups import (
     mockup_project_publication_lock,
     save_composed_mockup,
 )
-from pattern_reborn.patterns import PatternRequest, compose_pattern
+from pattern_reborn.patterns import PatternRequest, compose_pattern, fit_motif_to_canvas
 from pattern_reborn.preprocess import PreprocessError, PreprocessSettings, enhance
 from pattern_reborn.projects import ProjectRepository
 from pattern_reborn.segmentation import (
@@ -335,6 +335,10 @@ class PatternRebornService:
         extracted_path = self._resolve_artifact(project_dir, extracted_id)
         with Image.open(extracted_path) as image:
             motif = image.convert("RGBA").copy()
+        # The extraction keeps the source's working resolution; the canvas is the
+        # size of the requested tile. Fit the motif first, or a real photograph
+        # produces units beyond the intermediate-pixel budget on 重组.
+        motif = fit_motif_to_canvas(motif, request.canvas)
         composed = compose_pattern(motif, request)
         version = _next_version(project_dir / "patterns")
         pattern_id = f"patterns/v{version}.png"

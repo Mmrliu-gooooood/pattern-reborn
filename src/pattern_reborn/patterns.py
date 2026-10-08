@@ -124,6 +124,28 @@ def _require_canvas(value: object) -> tuple[int, int]:
         raise PatternError(str(error)) from error
 
 
+def fit_motif_to_canvas(motif: Image.Image, canvas: tuple[int, int]) -> Image.Image:
+    """Return ``motif`` shrunk to fit inside ``canvas``, preserving its aspect.
+
+    The confirmed extraction keeps the working resolution of the source (up to
+    2048px on the long edge for a photograph), while the canvas is the size of
+    the pattern tile the user asked for. Composing a 2048px motif into a 256px
+    tile built mirror/radial units that exceeded the intermediate-pixel budget,
+    so the service fits the motif first and ``PatternRequest.scale`` stays the
+    only way to zoom in. The motif is never enlarged, so a small, exact motif
+    keeps its original pixels and colours.
+    """
+    if not isinstance(motif, Image.Image):
+        raise PatternError("纹样图像无效。")
+    target_width, target_height = _require_canvas(canvas)
+    width, height = motif.size
+    if width <= target_width and height <= target_height:
+        return motif
+    ratio = min(target_width / width, target_height / height)
+    fitted = (max(1, int(width * ratio)), max(1, int(height * ratio)))
+    return motif.resize(fitted, Image.Resampling.LANCZOS)
+
+
 def compose_pattern(motif: Image.Image, request: PatternRequest) -> Image.Image:
     """Return an RGBA canvas filled by a deterministic layout of the motif."""
     if not isinstance(motif, Image.Image):

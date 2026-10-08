@@ -3,7 +3,13 @@ import pytest
 from pydantic import ValidationError
 
 import pattern_reborn.patterns as patterns_module
-from pattern_reborn.patterns import LayoutKind, PatternError, PatternRequest, compose_pattern
+from pattern_reborn.patterns import (
+    LayoutKind,
+    PatternError,
+    PatternRequest,
+    compose_pattern,
+    fit_motif_to_canvas,
+)
 
 
 @pytest.fixture
@@ -188,6 +194,33 @@ def test_compose_pattern_does_not_mutate_source(motif_rgba) -> None:
     compose_pattern(motif_rgba, PatternRequest(layout=LayoutKind.MIRROR, canvas=(64, 64), seed=1))
     assert motif_rgba.tobytes() == before
     assert motif_rgba.size == (32, 32)
+
+
+def test_fit_motif_to_canvas_shrinks_a_photo_sized_motif_to_the_tile() -> None:
+    motif = Image.new("RGBA", (2048, 1536), (180, 40, 45, 255))
+
+    fitted = fit_motif_to_canvas(motif, (256, 256))
+
+    assert fitted.size == (256, 192)
+    assert motif.size == (2048, 1536)
+
+
+def test_fit_motif_to_canvas_never_enlarges_or_recolours_a_small_motif(motif_rgba) -> None:
+    before = motif_rgba.tobytes()
+
+    fitted = fit_motif_to_canvas(motif_rgba, (512, 512))
+
+    assert fitted is motif_rgba
+    assert fitted.tobytes() == before
+
+
+def test_fit_motif_to_canvas_rejects_an_unsafe_tile() -> None:
+    motif = Image.new("RGBA", (64, 64))
+
+    with pytest.raises(PatternError):
+        fit_motif_to_canvas(motif, (0, 64))
+    with pytest.raises(PatternError):
+        fit_motif_to_canvas("not an image", (64, 64))
 
 
 def test_pattern_request_persists_composition_parameters() -> None:

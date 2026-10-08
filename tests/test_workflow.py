@@ -56,6 +56,42 @@ def _extract_and_confirm(app_service, project_id: str):
     return app_service.confirm_extraction(project_id, extraction.artifact_id), extraction
 
 
+def _write_large_motif(path: Path, size: tuple[int, int] = (2400, 1800)) -> Path:
+    """A source big enough that the confirmed extraction dwarfs a small tile."""
+    width, height = size
+    array = np.full((height, width, 3), 250, dtype=np.uint8)
+    array[height // 4 : height * 3 // 4, width // 4 : width * 3 // 4] = (176, 38, 44)
+    Image.fromarray(array).save(path, format="PNG")
+    return path
+
+
+@pytest.mark.parametrize("layout", list(LayoutKind))
+def test_compose_fits_a_large_extraction_into_the_requested_canvas(
+    app_service, tmp_path: Path, layout: LayoutKind
+) -> None:
+    """The recomposition step must work at its own defaults for a real photo.
+
+    The extracted motif keeps the working resolution of the source (2048px on
+    the long edge for a large photo) while the studio's default canvas is
+    256×256. Composing the motif at its native size built mirror/radial units
+    that blew the intermediate-pixel budget, so pressing 「重组」 rejected the
+    request instead of producing a pattern.
+    """
+    project = _create(app_service, _write_large_motif(tmp_path / "big.png"), name="大图重组")
+    _, extraction = _extract_and_confirm(app_service, project.id)
+    app_service.analyze(project.id)
+    with Image.open(extraction.path) as extracted:
+        assert max(extracted.size) > 256
+
+    pattern = app_service.compose(
+        project.id, PatternRequest(layout=layout, canvas=(256, 256), seed=7)
+    )
+
+    with Image.open(pattern.path) as composed:
+        assert composed.size == (256, 256)
+        assert composed.mode == "RGBA"
+
+
 class RecordingSegmenter:
     def __init__(self, algorithm_version: str) -> None:
         self.algorithm_version = algorithm_version
