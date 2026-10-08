@@ -195,7 +195,10 @@ class OpenCvSegmenter:
             require_grabcut_size=profile is ProfileId.ARTIFACT_PHOTO,
         )
         if profile is ProfileId.ARTIFACT_PHOTO and roi is None:
-            raise SegmentationError("文物照片配置需要有效 ROI。")
+            raise SegmentationError(
+                "器物照片档案需要先框选主体范围：请在「高级设置」的「手动坐标」中填写"
+                "框选左/框选上/框选右/框选下，或在左侧画布上框选。"
+            )
 
         parameters: dict[str, object] = {
             "minimum_component_area": self._minimum_component_area,

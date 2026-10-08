@@ -24,6 +24,9 @@ class DemoCase:
     license: str = ""
     category: CategoryId | None = None
     provenance: ProvenanceClass | None = None
+    # Documented region of interest as [x0, y0, x1, y1] fractions; recorded on
+    # the project so 器物照片 cases can be extracted without hand-typed boxes.
+    hint_box: tuple[float, float, float, float] | None = None
 
 
 def load_validated_demos(demo_root: Path) -> list[DemoCase]:
@@ -68,9 +71,51 @@ def load_validated_demos(demo_root: Path) -> list[DemoCase]:
                 license=license_name,
                 category=category,
                 provenance=provenance,
+                hint_box=_demo_hint_box(source_path.parent),
             )
         )
     return validated
+
+
+# Preference order for a case's documented region. ``roi`` is the case's primary
+# region; ``manual_box`` is the artifact-photograph equivalent; a named ``*_roi``
+# (``beam_roi``, ``cloud_roi``, …) is the fallback for multi-region cases.
+def _demo_hint_box(case_dir: Path) -> tuple[float, float, float, float] | None:
+    meta_path = case_dir / "metadata.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    defaults = meta.get("processing_defaults")
+    if not isinstance(defaults, dict):
+        return None
+    candidates = ["roi", "manual_box"]
+    candidates.extend(
+        sorted(key for key in defaults if key.endswith("_roi") and key not in candidates)
+    )
+    for key in candidates:
+        box = _normalized_box(defaults.get(key))
+        if box is not None:
+            return box
+    return None
+
+
+def _normalized_box(value: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    numbers: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        numbers.append(float(item))
+    left, top, right, bottom = numbers
+    if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+        return None
+    return (left, top, right, bottom)
 
 
 def _demo_rights(
@@ -272,6 +317,7 @@ def _open_demo(service: PatternRebornService, demo: DemoCase) -> None:
                 source=demo.source_path,
                 category=demo.category,
                 provenance=demo.provenance,
+                hint_box=demo.hint_box,
             )
         )
     except (WorkflowError, OSError) as error:

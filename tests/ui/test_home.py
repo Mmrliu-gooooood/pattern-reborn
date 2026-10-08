@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 from pattern_reborn.domain import CategoryId, ProvenanceClass
 from pattern_reborn.knowledge import KnowledgeCatalog
 from pattern_reborn.projects import ProjectRepository
+from pattern_reborn.ui.home import load_validated_demos
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = REPO_ROOT / "app.py"
@@ -153,6 +154,63 @@ def test_home_demo_cards_show_creator_and_license(
     text = _all_text(app)
     assert "Sean Chiu" in text
     assert "CC BY-SA" in text
+
+
+def test_demo_cases_carry_their_documented_processing_region(tmp_path: Path) -> None:
+    """The bundled cases document the region worth extracting; load it.
+
+    Without this, a judge opening the ceramic or architectural case meets
+    「器物照片配置需要有效 ROI」 with nothing to act on.
+    """
+    demo_root = tmp_path / "demo"
+    for case_id, defaults in (
+        ("with-roi", {"roi": [0.02, 0.08, 0.22, 0.62], "manual_box": [0.3, 0.3, 0.6, 0.6]}),
+        ("with-manual-box", {"manual_box": [0.28, 0.18, 0.62, 0.72]}),
+        ("with-named-roi", {"beam_roi": [0.18, 0.22, 0.82, 0.62]}),
+        ("without-region", {"craft_preset": "none"}),
+    ):
+        case = demo_root / case_id
+        case.mkdir(parents=True)
+        Image.new("RGB", (8, 8), (20, 80, 40)).save(case / "source.png")
+        (case / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "title": case_id,
+                    "creator_institution": "演示",
+                    "license": "Public Domain",
+                    "category": "ceramic_ornament",
+                    "provenance": "traditional_reference",
+                    "processing_defaults": defaults,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    (demo_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {"id": case_id, "title_zh": case_id, "source": f"{case_id}/source.png"}
+                    for case_id in (
+                        "with-roi",
+                        "with-manual-box",
+                        "with-named-roi",
+                        "without-region",
+                    )
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    regions = {case.id: case.hint_box for case in load_validated_demos(demo_root)}
+
+    # `roi` is the documented primary region; it outranks the others.
+    assert regions["with-roi"] == (0.02, 0.08, 0.22, 0.62)
+    assert regions["with-manual-box"] == (0.28, 0.18, 0.62, 0.72)
+    assert regions["with-named-roi"] == (0.18, 0.22, 0.82, 0.62)
+    assert regions["without-region"] is None
 
 
 def test_home_hides_demo_cards_when_assets_are_missing(

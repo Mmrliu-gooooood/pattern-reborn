@@ -28,6 +28,8 @@ from pattern_reborn.preprocess import PreprocessSettings, enhance
 from pattern_reborn.segmentation import (
     MaskEditMode,
     MaskStroke,
+    SegmentHints,
+    SegmentationError,
     SegmentResult,
     extract_rgba,
 )
@@ -63,6 +65,76 @@ def _write_large_motif(path: Path, size: tuple[int, int] = (2400, 1800)) -> Path
     array[height // 4 : height * 3 // 4, width // 4 : width * 3 // 4] = (176, 38, 44)
     Image.fromarray(array).save(path, format="PNG")
     return path
+
+
+def test_extract_applies_the_region_recorded_on_the_project(app_service, tmp_path: Path) -> None:
+    """A documented demo region must drive extraction without hand-typed boxes.
+
+    Two of the six bundled cases are 器物照片 (artifact_photo), whose segmenter
+    refuses to run without a region. Their metadata documents the region as
+    fractions of the image; it is recorded on the project at creation and
+    converted in the service, because the segmenter works in the working copy's
+    pixel space rather than the source's own dimensions.
+    """
+    source = _write_large_motif(tmp_path / "artifact.png", size=(800, 600))
+    project = app_service.create_project(
+        CreateProjectCommand(
+            name="器物照片",
+            source=source,
+            category=CategoryId.CERAMIC_ORNAMENT,
+            provenance=ProvenanceClass.USER_SUPPLIED_UNVERIFIED,
+            hint_box=(0.25, 0.25, 0.75, 0.75),
+        )
+    )
+    assert project.processing_parameters["hint_box"] == [0.25, 0.25, 0.75, 0.75]
+
+    extraction = app_service.extract(project.id, ExtractCommand(profile=ProfileId.ARTIFACT_PHOTO))
+
+    assert extraction.artifact_id.startswith("extracted/")
+    reloaded = app_service.load_project(project.id)
+    recorded = reloaded.processing_parameters["pending_extraction"]["hints"]["box"]
+    with Image.open(source) as original:
+        expected_width, expected_height = original.size
+    assert recorded == [
+        round(0.25 * expected_width),
+        round(0.25 * expected_height),
+        round(0.75 * expected_width),
+        round(0.75 * expected_height),
+    ]
+
+
+def test_explicit_hints_win_over_the_region_recorded_on_the_project(
+    app_service, tmp_path: Path
+) -> None:
+    source = _write_large_motif(tmp_path / "artifact.png", size=(800, 600))
+    project = app_service.create_project(
+        CreateProjectCommand(
+            name="覆盖区域",
+            source=source,
+            category=CategoryId.CERAMIC_ORNAMENT,
+            provenance=ProvenanceClass.USER_SUPPLIED_UNVERIFIED,
+            hint_box=(0.25, 0.25, 0.75, 0.75),
+        )
+    )
+
+    app_service.extract(
+        project.id,
+        ExtractCommand(profile=ProfileId.ARTIFACT_PHOTO, hints=SegmentHints(box=(40, 30, 400, 300))),
+    )
+
+    reloaded = app_service.load_project(project.id)
+    assert reloaded.processing_parameters["pending_extraction"]["hints"]["box"] == [40, 30, 400, 300]
+
+
+def test_extract_without_a_region_names_the_fields_to_fill(app_service, source_fixture: Path) -> None:
+    project = _create(app_service, source_fixture)
+
+    with pytest.raises(SegmentationError) as error:
+        app_service.extract(project.id, ExtractCommand(profile=ProfileId.ARTIFACT_PHOTO))
+
+    message = str(error.value)
+    assert "框选" in message
+    assert "高级设置" in message
 
 
 @pytest.mark.parametrize("layout", list(LayoutKind))

@@ -132,6 +132,9 @@ def _render_controls(context: StudioContext, project, canvas_active: bool) -> _C
 
     ui.render_divider()
     ui.render_kicker("手动坐标", "MANUAL GEOMETRY")
+    recorded = _recorded_region_note(project)
+    if recorded:
+        ui.render_note(recorded)
     box, points = _render_coordinate_inputs()
 
     profile_names = {profile.display_name_zh: profile.id for profile in context.knowledge.profiles}
@@ -153,6 +156,18 @@ def _render_controls(context: StudioContext, project, canvas_active: bool) -> _C
         points=points,
         profile=profile_names[profile_name],
         backend=backend,
+    )
+
+
+def _recorded_region_note(project) -> str:
+    """Say that a documented region will be used, so the result is never a surprise."""
+    box = project.processing_parameters.get("hint_box")
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return ""
+    left, top, right, bottom = (float(value) for value in box)
+    return (
+        f"已载入本案例记录的提取区域（横向 {left:.0%}–{right:.0%}、"
+        f"纵向 {top:.0%}–{bottom:.0%}）。填写下方坐标或在画布上框选即可覆盖它。"
     )
 
 

@@ -65,8 +65,13 @@ def test_textile_suppresses_light_texture_while_keeping_dark_motif() -> None:
 def test_artifact_requires_a_roi() -> None:
     image = np.full((48, 48, 3), 220, dtype=np.uint8)
 
-    with pytest.raises(SegmentationError, match="ROI"):
+    # The message names the failing fields and the recovery, not just "ROI".
+    with pytest.raises(SegmentationError) as error:
         OpenCvSegmenter().segment(image, ProfileId.ARTIFACT_PHOTO, SegmentHints())
+
+    message = str(error.value)
+    assert "框选左" in message and "框选下" in message
+    assert "高级设置" in message
 
 
 def test_artifact_clips_roi_and_extracts_grabcut_foreground_without_mutating_input() -> None:

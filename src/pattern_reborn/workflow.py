@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import Enum
 import json
+import math
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -81,6 +82,27 @@ class CreateProjectCommand(BaseModel):
     category: CategoryId
     provenance: ProvenanceClass
     subject: str | None = None
+    # Documented region of interest as fractions of the image, e.g. a bundled
+    # demo case's recorded 器物照片 box. Applied by ``extract`` when the caller
+    # supplies no box of its own.
+    hint_box: tuple[float, float, float, float] | None = None
+
+    @field_validator("hint_box", mode="before")
+    @classmethod
+    def validate_hint_box(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)) or len(value) != 4:
+            raise ValueError("记录区域必须包含四个 0 到 1 之间的坐标。")
+        numbers: list[float] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
+                raise ValueError("记录区域必须包含四个 0 到 1 之间的坐标。")
+            numbers.append(float(item))
+        left, top, right, bottom = numbers
+        if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+            raise ValueError("记录区域必须从左上方到右下方，且位于图像范围内。")
+        return (left, top, right, bottom)
 
 
 class ExtractCommand(BaseModel):
@@ -163,8 +185,14 @@ class PatternRebornService:
             command.category,
             command.provenance,
         )
-        if command.subject is not None:
-            project.subject = command.subject
+        if command.subject is not None or command.hint_box is not None:
+            if command.subject is not None:
+                project.subject = command.subject
+            if command.hint_box is not None:
+                project.processing_parameters = {
+                    **project.processing_parameters,
+                    "hint_box": list(command.hint_box),
+                }
             project.updated_at = datetime.now(UTC)
             self.repository.save(project)
         project = self.repository.confirm(
@@ -208,6 +236,7 @@ class PatternRebornService:
         source_alpha = np.ascontiguousarray(source_rgba[:, :, 3])
         processed = enhance(rgb, command.preprocess)
         hints = command.hints if command.hints is not None else SegmentHints()
+        hints = _with_recorded_hint_box(project, working, hints)
         result = segmenter.segment(processed, command.profile, hints)
         mask = result.mask
         if command.strokes:
@@ -524,6 +553,60 @@ def _current_mockup_artwork_ids(project: ProjectRecord) -> set[str]:
         if record.artifact_path not in stale
     )
     return ids
+
+
+def _with_recorded_hint_box(
+    project: ProjectRecord, working: Image.Image, hints: SegmentHints
+) -> SegmentHints:
+    """Apply the project's recorded region when the caller supplied no box.
+
+    Bundled demo cases document the region worth extracting as fractions of the
+    image. The segmenter runs on the working copy, whose size is set by the
+    decode budget rather than by the source's own dimensions, so the fractions
+    are converted here rather than in the UI. An explicit box always wins.
+    """
+    if hints.box is not None:
+        return hints
+    box = normalized_box_to_pixels(
+        project.processing_parameters.get("hint_box"), working.size
+    )
+    if box is None:
+        return hints
+    return SegmentHints(box=box, points=hints.points)
+
+
+def normalized_box_to_pixels(
+    record: object, size: tuple[int, int]
+) -> tuple[int, int, int, int] | None:
+    """Convert a recorded ``[x0, y0, x1, y1]`` fraction box into pixel corners.
+
+    Returns ``None`` for anything that is not a usable region, so a corrupt or
+    legacy project degrades to "no region" instead of raising mid-extraction.
+    """
+    if not isinstance(record, (list, tuple)) or len(record) != 4:
+        return None
+    values: list[float] = []
+    for value in record:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        values.append(number)
+    left_fraction, top_fraction, right_fraction, bottom_fraction = values
+    if not (
+        0.0 <= left_fraction < right_fraction <= 1.0
+        and 0.0 <= top_fraction < bottom_fraction <= 1.0
+    ):
+        return None
+    width, height = size
+    left = max(0, min(width, round(left_fraction * width)))
+    top = max(0, min(height, round(top_fraction * height)))
+    right = max(0, min(width, round(right_fraction * width)))
+    bottom = max(0, min(height, round(bottom_fraction * height)))
+    if right - left < 2 or bottom - top < 2:
+        return None
+    return (left, top, right, bottom)
 
 
 def _next_version(folder: Path, suffix: str = ".png") -> int:
