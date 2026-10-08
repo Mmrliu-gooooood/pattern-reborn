@@ -85,6 +85,14 @@ def pending_extraction(project_dir: Path, project: ProjectRecord) -> tuple[str, 
     return str(artifact_id), path
 
 
+def pending_mask(project_dir: Path, project: ProjectRecord) -> Path | None:
+    """Binary mask of the unconfirmed extraction, so it can be reviewed too."""
+    pending = project.processing_parameters.get("pending_extraction")
+    if not isinstance(pending, dict):
+        return None
+    return artifact_path(project_dir, pending.get("mask"))
+
+
 def confirmed_extraction(project_dir: Path, project: ProjectRecord) -> tuple[str, Path] | None:
     """Confirmed extracted artwork, ignoring anything marked stale."""
     stale = set(project.stale_artifacts)

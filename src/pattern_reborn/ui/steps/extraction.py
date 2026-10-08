@@ -15,6 +15,7 @@ from pattern_reborn.ui.presenters import (
     confirmed_extraction,
     confirmed_mask,
     pending_extraction,
+    pending_mask,
     source_path,
 )
 from pattern_reborn.ui.steps.context import StudioContext
@@ -52,7 +53,12 @@ def render(context: StudioContext) -> None:
 
     with workbench:
         if pending is not None:
-            _render_comparison(source, pending[1], badge="待确认")
+            _render_comparison(
+                source,
+                pending[1],
+                badge="待确认",
+                mask=pending_mask(project_dir, project),
+            )
             ui.render_note("结果尚未确认。确认后才会写入项目记录，并作为分析与生成的输入。")
         else:
             if confirmed is not None:
@@ -85,24 +91,29 @@ def render(context: StudioContext) -> None:
 
 
 def _render_comparison(source, result, badge: str, mask=None) -> None:
-    """Side-by-side source/result panels with consistent aspect treatment.
+    """Side-by-side source/result/mask panels with a constant shape.
 
-    The binary mask joins as a third panel once it exists, because it is the
-    only view that explains why a region was kept or dropped.
+    The mask joins as a third panel once it exists, because it is the only view
+    that explains why a region was kept or dropped. The column count stays at
+    three even while the mask is still missing: changing it between runs makes
+    Streamlit's index-based reconciliation leave the whole pre-confirmation
+    subtree in the document, dimmed but visible, above the live step.
     """
     ui.render_kicker("提取结果对照", "SOURCE / RESULT")
-    columns = st.columns(3 if mask is not None else 2, gap="medium")
+    source_column, result_column, mask_column = st.columns(3, gap="medium")
     if source is None:
-        with columns[0]:
+        with source_column:
             ui.render_empty_state("来源图像不可用", "项目记录的源文件缺失或已被移动。")
     else:
-        with columns[0]:
+        with source_column:
             ui.render_image_panel(source, "原始来源")
-    with columns[1]:
+    with result_column:
         ui.render_image_panel(result, "提取结果", badge=badge)
-    if mask is not None:
-        with columns[2]:
+    with mask_column:
+        if mask is not None:
             ui.render_image_panel(mask, "提取蒙版", badge="黑白")
+        else:
+            ui.render_empty_state("提取蒙版", "确认提取后在此显示黑白蒙版。")
 
 
 def _render_controls(context: StudioContext, project, canvas_active: bool) -> _Controls:
@@ -250,7 +261,9 @@ def _render_extract_action(context: StudioContext, project, values: _Controls) -
 
 
 def _render_confirm_action(context: StudioContext, project, artifact_id: str) -> None:
-    note_column, action_column = ui.action_bar("extraction-confirm")
+    # Same key as the extract action: a keyed container that changes identity
+    # between runs orphans the whole previous subtree in the document.
+    note_column, action_column = ui.action_bar("extraction")
     with note_column:
         ui.render_action_note("确认后提取结果将写入项目记录，并解锁纹样分析。")
     with action_column:

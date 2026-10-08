@@ -108,6 +108,28 @@ body,
   margin-bottom: 0 !important;
 }
 
+/* Streamlit keeps the element tree of the run that a widget callback aborted,
+ * marked `data-stale="true"` and dimmed to 33% opacity, until the next tree
+ * replaces it element by element. When a studio action changes the branch a
+ * step renders — confirming an extraction swaps its confirm bar for the extract
+ * bar — the orphans are never reclaimed, so the finished step stayed on screen,
+ * dimmed, above the live one and pushed it below the fold.
+ *
+ * Hide them once the run has settled: `stStatusWidget` is present only while
+ * the script is executing, so Streamlit's own dimming still applies mid-run. */
+.stApp:not(:has([data-testid="stStatusWidget"])) [data-stale="true"] {
+  display: none !important;
+}
+
+/* A keyed panel that is left holding nothing but orphans would still draw its
+ * border and padding, so collapse it as well. A live panel always contains at
+ * least one element marked `data-stale="false"`. */
+.stApp:not(:has([data-testid="stStatusWidget"])) [class*="st-key-workbench-"]:not(:has([data-stale="false"])),
+.stApp:not(:has([data-testid="stStatusWidget"])) [class*="st-key-controls-"]:not(:has([data-stale="false"])),
+.stApp:not(:has([data-testid="stStatusWidget"])) [class*="st-key-action-bar-"]:not(:has([data-stale="false"])) {
+  display: none !important;
+}
+
 :where(button, input, textarea, select, summary, [tabindex]):focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 2px;

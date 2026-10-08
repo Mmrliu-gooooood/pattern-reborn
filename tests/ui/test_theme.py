@@ -52,6 +52,21 @@ def test_sidebar_rail_targets_the_markup_streamlit_actually_renders() -> None:
     assert "var(--vermilion)" in rail
 
 
+def test_theme_hides_settled_streamlit_stale_leftovers() -> None:
+    """An aborted run's element tree is never reclaimed by Streamlit.
+
+    Confirming an extraction swaps the step's confirm bar for its extract bar;
+    the frontend then leaves the previous tree in the document dimmed to 33%
+    opacity, on top of the live step. The stylesheet must hide those leftovers
+    once the run has settled, and collapse a keyed panel left holding only them.
+    """
+    css = CSS_PATH.read_text(encoding="utf-8")
+    assert '[data-stale="true"]' in css
+    assert ':not(:has([data-testid="stStatusWidget"]))' in css
+    for prefix in ("st-key-workbench-", "st-key-controls-", "st-key-action-bar-"):
+        assert f'[class*="{prefix}"]:not(:has([data-stale="false"]))' in css
+
+
 def test_ruyi_cloud_svg_is_original_project_asset() -> None:
     svg = SVG_PATH.read_text(encoding="utf-8")
     assert "Pattern Reborn original asset" in svg
