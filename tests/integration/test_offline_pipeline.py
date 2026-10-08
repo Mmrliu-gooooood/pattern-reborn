@@ -3,14 +3,65 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PIL import Image
 import pytest
 
-from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass
+from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass, StepId
 from pattern_reborn.exporter import ExportSelection
 from pattern_reborn.generation.base import CredentialMode, GenerationFailure, ProviderId
 from pattern_reborn.patterns import LayoutKind, PatternRequest
 from pattern_reborn.workflow import CreateProjectCommand, ExtractCommand
 from tests.test_generation_base import make_generation_request
+from tests.workflow_fixtures import DEMO_ROOT, competition_case_ids, load_demo_fixture
+
+COMPETITION_CASE_IDS = competition_case_ids()
+
+
+def test_every_bundled_demo_case_is_available() -> None:
+    assert COMPETITION_CASE_IDS == [
+        "lotus-paper-cut",
+        "fish-lotus-blue-calico",
+        "peony-embroidery",
+        "scrolling-lotus-ceramic",
+        "new-year-picture-detail",
+        "architectural-cloud",
+    ]
+
+
+@pytest.mark.parametrize("case_id", COMPETITION_CASE_IDS)
+def test_each_demo_reaches_traceable_export_offline(app_service, case_id: str) -> None:
+    """A judge must complete the whole offline flow from any bundled case.
+
+    The case is opened through the same loader the home page uses, extracted
+    with the shipped default profile (the service applies the case's recorded
+    region), analysed, recomposed on the studio's default canvas, and exported.
+    """
+    fixture = load_demo_fixture(DEMO_ROOT, case_id)
+
+    project = app_service.create_project(
+        CreateProjectCommand(
+            name=fixture.title,
+            source=fixture.source,
+            category=fixture.category,
+            provenance=fixture.provenance,
+            hint_box=fixture.hint_box,
+        )
+    )
+    extraction = app_service.extract(project.id, ExtractCommand(profile=fixture.profile))
+    app_service.confirm_extraction(project.id, extraction.artifact_id)
+    analysis = app_service.analyze(project.id)
+    pattern = app_service.compose(project.id, fixture.pattern_request)
+    package = app_service.export(project.id, ExportSelection.all_offline())
+    reopened = app_service.load_project(project.id)
+
+    assert analysis.palette, case_id
+    with Image.open(pattern.path) as composed:
+        assert composed.size == (256, 256)
+    assert package.is_dir()
+    assert (package / "manifest.json").is_file()
+    assert (package / "provenance.md").is_file()
+    assert StepId.EXPORT in reopened.confirmed_steps
+    assert reopened.processing_parameters["current_step"] == StepId.EXPORT.value
 
 
 def test_offline_pipeline_reaches_export_without_generation(app_service, source_fixture: Path) -> None:

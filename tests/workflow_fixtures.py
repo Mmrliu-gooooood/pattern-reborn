@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from PIL import Image
 from pydantic import SecretStr
 import pytest
 
+from pattern_reborn.domain import CategoryId, ProfileId, ProvenanceClass
 from pattern_reborn.generation.base import (
     FailureKind,
     GenerationFailure,
@@ -16,10 +19,90 @@ from pattern_reborn.generation.base import (
 )
 from pattern_reborn.generation.service import GenerationService
 from pattern_reborn.knowledge import KnowledgeCatalog
+from pattern_reborn.patterns import LayoutKind, PatternRequest
 from pattern_reborn.projects import ProjectRepository
+from pattern_reborn.ui.home import DemoCase, load_validated_demos
 from pattern_reborn.workflow import PatternRebornService
 
 _KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "data" / "knowledge"
+DEMO_ROOT = Path(__file__).resolve().parents[1] / "data" / "demo"
+
+# The canvas the studio offers by default, so the judge flow is exercised with
+# the shipped defaults rather than with a hand-tuned request.
+DEMO_CANVAS = (256, 256)
+
+_LAYOUT_BY_PROFILE = {
+    ProfileId.SILHOUETTE: LayoutKind.RADIAL,
+    ProfileId.TEXTILE: LayoutKind.FOUR_WAY,
+    ProfileId.FLAT_COLOR: LayoutKind.MIRROR,
+    ProfileId.ARTIFACT_PHOTO: LayoutKind.BORDER,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DemoWorkflowFixture:
+    """One bundled demonstration case, opened exactly as the home page opens it."""
+
+    case: DemoCase
+    profile: ProfileId
+    pattern_request: PatternRequest
+
+    @property
+    def id(self) -> str:
+        return self.case.id
+
+    @property
+    def title(self) -> str:
+        return self.case.title_zh
+
+    @property
+    def category(self) -> CategoryId:
+        assert self.case.category is not None
+        return self.case.category
+
+    @property
+    def provenance(self) -> ProvenanceClass:
+        assert self.case.provenance is not None
+        return self.case.provenance
+
+    @property
+    def source(self) -> Path:
+        return self.case.source_path
+
+    @property
+    def hint_box(self) -> tuple[float, float, float, float] | None:
+        return self.case.hint_box
+
+
+def competition_case_ids(root: Path = DEMO_ROOT) -> list[str]:
+    """Case ids as the application itself validates them, or an empty list."""
+    return [case.id for case in load_validated_demos(root)]
+
+
+def load_demo_fixture(root: Path, case_id: str) -> DemoWorkflowFixture:
+    """Build a case fixture from the same loader the home page uses."""
+    case = next((item for item in load_validated_demos(root) if item.id == case_id), None)
+    if case is None:
+        raise AssertionError(f"演示案例不可用：{case_id}")
+    if case.category is None or case.provenance is None:
+        raise AssertionError(f"演示案例权属信息不完整：{case_id}")
+    metadata = json.loads((root / case_id / "metadata.json").read_text(encoding="utf-8"))
+    profile = ProfileId(metadata["profile"])
+    return DemoWorkflowFixture(
+        case=case,
+        profile=profile,
+        pattern_request=_pattern_request(profile, metadata.get("processing_defaults") or {}),
+    )
+
+
+def _pattern_request(profile: ProfileId, defaults: dict) -> PatternRequest:
+    """Derive a repeat layout from the case's own documented defaults."""
+    layout = _LAYOUT_BY_PROFILE[profile]
+    if isinstance(defaults.get("radial"), dict):
+        layout = LayoutKind.RADIAL
+    elif isinstance(defaults.get("tile"), dict):
+        layout = LayoutKind.FOUR_WAY
+    return PatternRequest(layout=layout, canvas=DEMO_CANVAS, seed=20260830)
 
 
 class StaticCredentialResolver:
