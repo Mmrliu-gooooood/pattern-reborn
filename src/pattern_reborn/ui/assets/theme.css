@@ -208,7 +208,13 @@ section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
   font-size: 0.95rem;
 }
 
-/* Step rail: a gilded spine with one dot per step. */
+/* Step rail: a gilded spine with one dot per step.
+ *
+ * Streamlit 1.62 renders each option as
+ * `label[data-testid="stRadioOption"]`, marked `data-selected="true"` when
+ * active. Its children are a visually hidden native input, then
+ * `div > div > div` (the ring) containing the inner dot. There is no
+ * `role="radio"` anywhere, so every rule below must address that markup. */
 section[data-testid="stSidebar"] [data-testid="stRadio"] {
   position: relative;
   padding-left: 0.15rem;
@@ -217,7 +223,7 @@ section[data-testid="stSidebar"] [data-testid="stRadio"] {
 section[data-testid="stSidebar"] [data-testid="stRadio"]::before {
   content: "";
   position: absolute;
-  left: 0.94rem;
+  left: 1.03rem;
   top: 1.02rem;
   bottom: 1.02rem;
   width: 1px;
@@ -228,62 +234,70 @@ section[data-testid="stSidebar"] [role="radiogroup"] {
   gap: 0.12rem;
 }
 
-section[data-testid="stSidebar"] [role="radio"] {
+section[data-testid="stSidebar"] [data-testid="stRadioOption"] {
   position: relative;
   min-height: 2.65rem;
   margin: 0;
-  padding: 0.48rem 0 0.48rem 2.25rem !important;
+  padding: 0.48rem 0 0.48rem 0.55rem !important;
   border: 0 !important;
   border-left: 1px solid transparent !important;
   background: transparent !important;
+  cursor: pointer;
   transition: background-color 0.18s ease, border-color 0.18s ease;
 }
 
-section[data-testid="stSidebar"] [role="radio"]::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  left: 0.48rem;
-  top: 0.86rem;
-  width: 0.78rem;
-  height: 0.78rem;
-  background: var(--ink);
-  border: 1px solid rgba(234, 214, 165, 0.9);
-  border-radius: 999px;
-}
-
-section[data-testid="stSidebar"] [role="radio"]:has(input:checked) {
+section[data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] {
   background: rgba(255, 255, 255, 0.085) !important;
   border-left-color: var(--gold-soft) !important;
 }
 
+/* The ring: a low-contrast gilded outline for future steps. */
+section[data-testid="stSidebar"]
+  [data-testid="stRadioOption"]
+  > div:last-child
+  > div
+  > div:first-child {
+  background: rgba(234, 214, 165, 0.22) !important;
+  box-shadow: inset 0 0 0 1px rgba(234, 214, 165, 0.5);
+}
+
+/* The inner disc reads as a hole while the step is pending, so the ring looks
+ * hollow rather than filled. */
+section[data-testid="stSidebar"]
+  [data-testid="stRadioOption"]
+  > div:last-child
+  > div
+  > div:first-child
+  > div {
+  background: var(--ink) !important;
+}
+
 /* Only the active step may carry cinnabar — never cinnabar text on ink green. */
-section[data-testid="stSidebar"] [role="radio"]:has(input:checked)::before {
-  left: 0.22rem;
-  top: 0.58rem;
-  width: 1.3rem;
-  height: 1.3rem;
-  background: var(--vermilion);
-  border: 3px solid var(--gold-soft);
-  box-shadow: 0 0 0 1px var(--vermilion);
+section[data-testid="stSidebar"]
+  [data-testid="stRadioOption"][data-selected="true"]
+  > div:last-child
+  > div
+  > div:first-child {
+  background: var(--vermilion) !important;
+  box-shadow: 0 0 0 3px rgba(234, 214, 165, 0.85) !important;
 }
 
-section[data-testid="stSidebar"] [role="radio"] input,
-section[data-testid="stSidebar"] [role="radio"] [data-testid="stWidgetLabel"] + div {
-  display: none !important;
+section[data-testid="stSidebar"]
+  [data-testid="stRadioOption"][data-selected="true"]
+  > div:last-child
+  > div
+  > div:first-child
+  > div {
+  background: #fff6e4 !important;
 }
 
-section[data-testid="stSidebar"] [role="radio"] label,
-section[data-testid="stSidebar"] [role="radio"] p,
-section[data-testid="stSidebar"] [role="radio"] span {
+section[data-testid="stSidebar"] [data-testid="stRadioOption"] p {
   color: rgba(255, 248, 230, 0.82) !important;
   font-size: 0.92rem !important;
   font-weight: 600;
 }
 
-section[data-testid="stSidebar"] [role="radio"]:has(input:checked) label,
-section[data-testid="stSidebar"] [role="radio"]:has(input:checked) p,
-section[data-testid="stSidebar"] [role="radio"]:has(input:checked) span {
+section[data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] p {
   color: #fff9e8 !important;
   font-size: 0.96rem !important;
   font-weight: 800 !important;

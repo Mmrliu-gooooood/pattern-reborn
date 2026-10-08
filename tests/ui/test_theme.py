@@ -37,6 +37,21 @@ def test_theme_neutralises_streamlit_markdown_container_margin() -> None:
     assert "margin-bottom: 0 !important" in trailing_paragraph
 
 
+def test_sidebar_rail_targets_the_markup_streamlit_actually_renders() -> None:
+    """Streamlit 1.62 emits no `role="radio"`, so the rail styling is lost.
+
+    Each option is `label[data-testid="stRadioOption"]` with `data-selected` on
+    the active one. A rule keyed on `[role="radio"]` matches nothing and the
+    active dot silently keeps the theme's gold instead of cinnabar.
+    """
+    css = CSS_PATH.read_text(encoding="utf-8")
+    rail = css.split("/* Step rail:", 1)[1].split("/* -------------------------------------------------------- 3.", 1)[0]
+    assert '[role="radio"]' not in rail
+    assert '[data-testid="stRadioOption"]' in rail
+    assert '[data-selected="true"]' in rail
+    assert "var(--vermilion)" in rail
+
+
 def test_ruyi_cloud_svg_is_original_project_asset() -> None:
     svg = SVG_PATH.read_text(encoding="utf-8")
     assert "Pattern Reborn original asset" in svg
