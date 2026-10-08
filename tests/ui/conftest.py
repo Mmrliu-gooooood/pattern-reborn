@@ -88,7 +88,10 @@ def studio_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_adapt
     workspace.mkdir()
     demo_root = tmp_path / "demo"
     demo_root.mkdir()
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
     monkeypatch.setenv("PATTERN_REBORN_WORKSPACE", str(workspace))
+    monkeypatch.setenv("PATTERN_REBORN_OUTPUTS", str(outputs))
     monkeypatch.setenv("PATTERN_REBORN_DEMO_ROOT", str(demo_root))
     monkeypatch.delenv("SEEDREAM_API_KEY", raising=False)
     monkeypatch.delenv("QWEN_API_KEY", raising=False)

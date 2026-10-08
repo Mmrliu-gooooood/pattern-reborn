@@ -1,0 +1,27 @@
+# Native Streamlit theme so built-in widgets share the studio palette instead of
+# fighting the injected stylesheet in src/pattern_reborn/ui/assets/theme.css.
+# Keep these values in sync with the :root tokens in that file.
+
+[server]
+address = "127.0.0.1"
+
+[theme]
+base = "light"
+primaryColor = "#c83b2b"
+backgroundColor = "#f7f1e4"
+secondaryBackgroundColor = "#fffaf0"
+textColor = "#28323a"
+linkColor = "#a8352a"
+borderColor = "rgba(170, 124, 47, 0.34)"
+baseRadius = "0.5rem"
+buttonRadius = "0.44rem"
+font = "Microsoft YaHei, PingFang SC, Noto Sans SC, sans-serif"
+headingFont = "KaiTi, STKaiti, Microsoft YaHei, serif"
+codeFont = "Consolas, Menlo, monospace"
+
+[theme.sidebar]
+backgroundColor = "#123f35"
+secondaryBackgroundColor = "#0d342b"
+textColor = "#f6efdd"
+primaryColor = "#d4ad57"
+borderColor = "rgba(234, 214, 165, 0.34)"

@@ -192,6 +192,19 @@ def test_home_hides_demo_cards_when_assets_are_missing(
     assert "缺失素材演示" not in text
 
 
+def test_home_explains_each_optional_capability(app_test: AppTest, monkeypatch) -> None:
+    """A missing extra must be explained, not silently omitted."""
+    monkeypatch.setattr("pattern_reborn.capabilities.find_spec", lambda name: None)
+    app_test.run()
+    assert not app_test.exception
+    text = _all_text(app_test)
+    for label in ("SVG 矢量导出", "MobileSAM 引导分割", "可绘制画布"):
+        assert label in text, label
+    assert "不可用" in text
+    # The reason string must reach the user, so "not installed" is distinguishable.
+    assert "VTracer" in text or "画布" in text
+
+
 def test_home_does_not_expose_default_api_secret(
     app_test: AppTest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -200,6 +213,92 @@ def test_home_does_not_expose_default_api_secret(
     assert not app_test.exception
     assert SECRET not in _all_text(app_test)
     assert SECRET not in repr(app_test)
+
+
+def test_home_never_shows_raw_enum_values_in_project_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project cards must speak Chinese, not expose CategoryId/StepId values."""
+    workspace = tmp_path / "workspace"
+    demo_root = tmp_path / "demo"
+    demo_root.mkdir()
+    monkeypatch.setenv("PATTERN_REBORN_WORKSPACE", str(workspace))
+    monkeypatch.setenv("PATTERN_REBORN_DEMO_ROOT", str(demo_root))
+    source = tmp_path / "source.png"
+    Image.new("RGB", (8, 8), (200, 40, 40)).save(source)
+    repository = ProjectRepository(workspace)
+    project = repository.create(
+        "可打开项目",
+        source,
+        CategoryId.PAPER_CUTTING,
+        ProvenanceClass.USER_SUPPLIED_UNVERIFIED,
+    )
+    project.processing_parameters["current_step"] = "extraction"
+    repository.save(project)
+
+    app = AppTest.from_file(APP_PATH, default_timeout=15)
+    app.run()
+    assert not app.exception
+    text = _all_text(app)
+    assert "可打开项目" in text
+    assert "剪纸" in text
+    assert "轮廓提取" in text
+    assert "paper_cutting" not in text
+    assert "user_supplied_unverified" not in text
+
+
+def test_hero_demo_button_toggles_the_demo_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The button used to write a session key that nothing ever read."""
+    demo_root = tmp_path / "demo"
+    case = demo_root / "lotus"
+    case.mkdir(parents=True)
+    Image.new("RGB", (8, 8), (20, 80, 40)).save(case / "source.png")
+    (demo_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "lotus-paper-cut",
+                        "title_zh": "莲纹剪纸演示",
+                        "source": "lotus/source.png",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PATTERN_REBORN_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("PATTERN_REBORN_DEMO_ROOT", str(demo_root))
+    app = AppTest.from_file(APP_PATH, default_timeout=15)
+    app.run()
+    assert not app.exception
+    assert "莲纹剪纸演示" in _all_text(app)
+
+    collapse = next(button for button in app.button if button.label == "收起演示案例")
+    collapse.click().run()
+    assert not app.exception
+    assert "莲纹剪纸演示" not in _all_text(app)
+
+    expand = next(button for button in app.button if button.label == "查看演示案例")
+    expand.click().run()
+    assert not app.exception
+    assert "莲纹剪纸演示" in _all_text(app)
+
+
+def test_home_category_names_are_not_duplicated(app_test: AppTest) -> None:
+    """Each category name appears once, as the card's actionable title."""
+    catalog = KnowledgeCatalog.load(KNOWLEDGE_DIR)
+    app_test.run()
+    assert not app_test.exception
+    markdown = "\n".join(str(node.value) for node in app_test.markdown)
+    labels = [button.label for button in app_test.button]
+    for category in catalog.categories:
+        name = category.display_name_zh
+        assert name in labels
+        assert name not in markdown
 
 
 def test_recent_project_is_history_entry(

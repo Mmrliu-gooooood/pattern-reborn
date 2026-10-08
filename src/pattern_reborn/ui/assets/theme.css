@@ -1,46 +1,167 @@
+/* Pattern Reborn — studio theme.
+ *
+ * Structure: tokens, then global shell, then shared components, then native
+ * Streamlit widget surfaces, then responsive/reduced-motion overrides.
+ * Every selector is declared exactly once; `!important` is reserved for
+ * overriding Streamlit's own component styles.
+ *
+ * Two card surfaces are driven by container keys rather than by hand-written
+ * HTML wrappers, because Streamlit closes each `st.markdown` call inside its
+ * own element container and an HTML `<div>` can therefore never wrap a widget:
+ *   [class*="st-key-workbench-"]  -> bounded image workbench
+ *   [class*="st-key-controls-"]   -> control panel beside it
+ *   [class*="st-key-recent-card-"] [class*="st-key-category-card-"]
+ *   [class*="st-key-demo-card-"]  -> home cards that contain image + button
+ */
+
 :root {
-  --ink-green: #1f4d3a;
-  --vermilion: #c23a2b;
-  --gilded-gold: #c6a15b;
-  --paper: #f4eee0;
-  --edit-surface: #f7f7f7;
-  --edit-border: #e6e6e6;
+  /* --ink-green and --gilded-gold are semantic aliases of --ink and --gold. */
+  --ink-green: #123f35;
+  --gilded-gold: #d4ad57;
+
+  --ink: #123f35;
+  --ink-deep: #0d342b;
+  --paper: #f7f1e4;
+  --paper-card: #fffaf0;
+  --paper-field: #fffaf1;
+  --paper-deep: #efe4cf;
+  --vermilion: #c83b2b;
+  --vermilion-soft: rgba(200, 59, 43, 0.36);
+  --gold: #d4ad57;
+  --gold-soft: #ead6a5;
+  --line: rgba(170, 124, 47, 0.34);
+  --line-strong: rgba(181, 138, 67, 0.5);
+  --text: #28323a;
+  --muted: #6e7473;
+  --muted-ink: #81755e;
+
+  --radius-lg: 14px;
+  --radius: 10px;
+  --radius-sm: 8px;
+  --radius-xs: 7px;
+
+  --shadow: 0 14px 34px rgba(68, 48, 20, 0.07);
+  --shadow-soft: 0 8px 23px rgba(75, 55, 23, 0.045);
+  --shadow-lift: 0 6px 14px rgba(51, 38, 18, 0.12);
 }
+
+/* ---------------------------------------------------------------- 1. Shell */
 
 html,
 body,
 [data-testid="stAppViewContainer"] {
+  background: var(--paper) !important;
+  color: var(--text);
   font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
 }
 
 .stApp {
   background-color: var(--paper);
-  background-image:
-    radial-gradient(ellipse at 18% 24%, rgba(198, 161, 91, 0.09) 0%, transparent 58%),
-    radial-gradient(ellipse at 86% 78%, rgba(31, 77, 58, 0.07) 0%, transparent 52%);
+  background-image: radial-gradient(ellipse at 88% 10%, rgba(212, 173, 87, 0.11), transparent 42%);
 }
+
+/* Paper grain. Decorative only, so it must never intercept pointer events. */
+.stApp::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  background-image: radial-gradient(rgba(116, 84, 42, 0.11) 0.55px, transparent 0.7px);
+  background-size: 7px 7px;
+}
+
+[data-testid="stHeader"] {
+  height: 3.5rem;
+  background: rgba(255, 251, 242, 0.94) !important;
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+
+[data-testid="stToolbar"] {
+  right: 1.3rem;
+}
+
+[data-testid="stMainBlockContainer"] {
+  position: relative;
+  max-width: 1540px;
+  padding: 2.8rem clamp(1.6rem, 4vw, 4.8rem) 4.8rem;
+}
+
+/* Column rows must not stretch a short panel to match a tall neighbour. */
+[data-testid="stHorizontalBlock"] {
+  align-items: start;
+}
+
+:where(button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* --------------------------------------------------------------- 2. Sidebar */
 
 section[data-testid="stSidebar"] {
-  background-color: var(--ink-green);
-  border-right: 1px solid var(--gilded-gold);
+  min-width: 19.5rem !important;
+  width: 19.5rem !important;
+  background: var(--ink) !important;
+  border: 0 !important;
+  box-shadow: 8px 0 24px rgba(8, 37, 30, 0.08);
 }
 
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] span,
-section[data-testid="stSidebar"] label {
-  color: #f4eee0;
+section[data-testid="stSidebar"] > div {
+  min-height: 100%;
+  padding: 0 1.6rem;
 }
 
-section[data-testid="stSidebar"] [aria-checked="true"],
-section[data-testid="stSidebar"] [data-checked="true"] {
-  color: var(--vermilion);
-  border-color: var(--vermilion);
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+  color: inherit !important;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 2.1rem 0 2rem;
+}
+
+.brand-seal {
+  display: grid;
+  place-items: center;
+  width: 3.45rem;
+  height: 3.45rem;
+  background: var(--vermilion);
+  border: 1px solid var(--gold-soft);
+  border-radius: var(--radius-xs);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+  color: #fff6e4;
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
+.brand-title {
+  color: #fff9ea;
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.8rem;
+  letter-spacing: 0.1em;
+  line-height: 1.1;
+}
+
+.brand-english {
+  margin-top: 0.34rem;
+  color: var(--gold-soft);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.27em;
 }
 
 .ruyi-ornament {
-  opacity: 0.16;
-  color: #f4eee0;
-  margin: 0.4rem 0.2rem 1.2rem;
+  display: block;
+  margin: 0.4rem 0.4rem 1.6rem;
+  color: var(--gold-soft);
+  opacity: 0.17;
+  pointer-events: none;
 }
 
 .ruyi-ornament svg {
@@ -49,25 +170,791 @@ section[data-testid="stSidebar"] [data-checked="true"] {
 }
 
 .heritage-seal {
+  display: inline-block;
+  margin: 0 0.35rem 1.6rem;
+  padding: 0.46rem 0.32rem;
+  border: 1px solid rgba(234, 214, 165, 0.58);
+  color: var(--gold-soft);
+  font-size: 0.78rem;
+  letter-spacing: 0.22em;
   writing-mode: vertical-rl;
   text-orientation: mixed;
-  letter-spacing: 0.35em;
+}
+
+.progress-label {
+  margin: 0 0 1rem;
+  color: var(--gold-soft);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+}
+
+.progress-label b {
+  color: #f5d889;
+  font-size: 0.95rem;
+}
+
+/* Step rail: a gilded spine with one dot per step. */
+section[data-testid="stSidebar"] [data-testid="stRadio"] {
+  position: relative;
+  padding-left: 0.15rem;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"]::before {
+  content: "";
+  position: absolute;
+  left: 0.94rem;
+  top: 1.02rem;
+  bottom: 1.02rem;
+  width: 1px;
+  background: rgba(234, 214, 165, 0.54);
+}
+
+section[data-testid="stSidebar"] [role="radiogroup"] {
+  gap: 0.12rem;
+}
+
+section[data-testid="stSidebar"] [role="radio"] {
+  position: relative;
+  min-height: 2.65rem;
+  margin: 0;
+  padding: 0.48rem 0 0.48rem 2.25rem !important;
+  border: 0 !important;
+  border-left: 1px solid transparent !important;
+  background: transparent !important;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+section[data-testid="stSidebar"] [role="radio"]::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: 0.48rem;
+  top: 0.86rem;
+  width: 0.78rem;
+  height: 0.78rem;
+  background: var(--ink);
+  border: 1px solid rgba(234, 214, 165, 0.9);
+  border-radius: 999px;
+}
+
+section[data-testid="stSidebar"] [role="radio"]:has(input:checked) {
+  background: rgba(255, 255, 255, 0.085) !important;
+  border-left-color: var(--gold-soft) !important;
+}
+
+/* Only the active step may carry cinnabar — never cinnabar text on ink green. */
+section[data-testid="stSidebar"] [role="radio"]:has(input:checked)::before {
+  left: 0.22rem;
+  top: 0.58rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  background: var(--vermilion);
+  border: 3px solid var(--gold-soft);
+  box-shadow: 0 0 0 1px var(--vermilion);
+}
+
+section[data-testid="stSidebar"] [role="radio"] input,
+section[data-testid="stSidebar"] [role="radio"] [data-testid="stWidgetLabel"] + div {
+  display: none !important;
+}
+
+section[data-testid="stSidebar"] [role="radio"] label,
+section[data-testid="stSidebar"] [role="radio"] p,
+section[data-testid="stSidebar"] [role="radio"] span {
+  color: rgba(255, 248, 230, 0.82) !important;
+  font-size: 0.92rem !important;
+  font-weight: 600;
+}
+
+section[data-testid="stSidebar"] [role="radio"]:has(input:checked) label,
+section[data-testid="stSidebar"] [role="radio"]:has(input:checked) p,
+section[data-testid="stSidebar"] [role="radio"]:has(input:checked) span {
+  color: #fff9e8 !important;
+  font-size: 0.96rem !important;
+  font-weight: 800 !important;
+}
+
+.side-footer {
+  margin: 1.85rem 0 1.25rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid rgba(234, 214, 165, 0.42);
+  color: #f3e5bc;
+  font-size: 0.79rem;
+  letter-spacing: 0.06em;
+  line-height: 1.65;
+}
+
+/* -------------------------------------------------------- 3. Step headings */
+
+.studio-header {
+  max-width: 100%;
+  margin-bottom: 2.1rem;
+  padding: 0.35rem 0 1.45rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.studio-header__step {
+  color: #bd3c2c;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.19em;
+}
+
+.studio-header h1 {
+  margin: 0.65rem 0 0.75rem;
+  color: var(--ink-deep);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: clamp(2.45rem, 3.6vw, 3.65rem);
+  letter-spacing: 0.05em;
+  line-height: 1.18;
+}
+
+.studio-header p {
+  max-width: 47rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.85;
+}
+
+/* --------------------------------------------------- 4. Panels and kickers */
+
+/* Container-key hooks: the only way an HTML surface can wrap Streamlit widgets.
+ * The `!important` flags are required because Streamlit's base stylesheet sets
+ * padding and a transparent border on every element container with higher
+ * precedence than a two-attribute selector; without it the panel frames would
+ * not enclose their widgets. */
+[class*="st-key-workbench-"],
+[class*="st-key-controls-"] {
+  min-width: 0 !important;
+  padding: 1.5rem !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius) !important;
+  background: rgba(255, 251, 242, 0.91) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+.panel-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 1.1rem;
+  padding: 0.75rem 0.95rem;
+  border-left: 3px solid var(--vermilion);
+  border-bottom: 1px solid rgba(212, 173, 87, 0.36);
+  background: rgba(255, 251, 242, 0.66);
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.panel-kicker__en {
+  color: var(--muted-ink);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
+
+.panel-divider {
+  height: 0.15rem;
+  margin: 1.1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Invisible spacer used to align a button with an adjacent labelled input. */
+.field-spacer {
+  height: 1.72rem;
+}
+
+.panel-note {
+  margin: 0.2rem 0 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+/* ---------------------------------------------------------- 5. Image panels */
+
+[data-testid="stImage"] {
+  border: 1px solid rgba(180, 142, 77, 0.4);
+  border-radius: var(--radius-sm);
+  background: #fffdf8;
+  box-shadow: 0 7px 20px rgba(70, 55, 26, 0.06);
+  overflow: hidden;
+}
+
+/* Bounded preview: a tall source image may not push controls below the fold. */
+[data-testid="stImage"] img {
+  display: block;
+  max-height: 30rem;
+  object-fit: contain;
+}
+
+/* ------------------------------------------------------------ 6. Home cards */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  max-width: 100%;
+  padding: clamp(2rem, 4vw, 3.6rem);
+  border: 1px solid rgba(181, 138, 67, 0.46);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 250, 240, 0.82);
+  box-shadow: var(--shadow);
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  right: -6rem;
+  bottom: -8rem;
+  width: 13rem;
+  height: 13rem;
+  border: 1px solid rgba(212, 173, 87, 0.3);
+  border-radius: 47% 53% 38% 62%;
+  transform: rotate(28deg);
+  pointer-events: none;
+}
+
+.hero .eyebrow {
+  color: #bd3c2c;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.19em;
+}
+
+.hero h1 {
+  margin: 0.65rem 0 0.75rem;
+  color: var(--ink-deep);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: clamp(2.45rem, 3.6vw, 3.65rem);
+  letter-spacing: 0.05em;
+  line-height: 1.18;
+}
+
+.hero p {
+  max-width: 47rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.85;
+}
+
+.section-heading {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  margin: 3.15rem 0 1.15rem;
+  padding-bottom: 0.72rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.section-heading strong {
+  color: var(--ink);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.72rem;
+}
+
+.section-heading span {
+  color: var(--muted-ink);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+}
+
+/* Home card containers: the keyed hook owns the surface so the card body, its
+ * image and its action button read as one unit. `!important` overrides the
+ * element-container defaults for the same reason as the studio panels. */
+[class*="st-key-recent-card-"],
+[class*="st-key-category-card-"],
+[class*="st-key-demo-card-"] {
+  gap: 0 !important;
+  min-height: 8.75rem;
+  margin-bottom: 0.55rem;
+  padding: 1.3rem 1.4rem 0.9rem !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius) !important;
+  background: rgba(255, 251, 242, 0.91) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+
+[class*="st-key-demo-card-"] {
+  min-height: 0;
+  padding-bottom: 0.9rem !important;
+  overflow: hidden;
+}
+
+/* The action button is the card's own footer, not a detached control. */
+[class*="st-key-recent-card-"] [data-testid="stButton"] button,
+[class*="st-key-category-card-"] [data-testid="stButton"] button,
+[class*="st-key-demo-card-"] [data-testid="stButton"] button {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 2.3rem;
+  margin-top: 0.3rem;
+  padding-inline: 0.85rem;
+  border-color: transparent;
+  background: rgba(212, 173, 87, 0.14);
+  color: var(--ink);
+  font-size: 0.84rem;
+  letter-spacing: 0.04em;
+}
+
+[class*="st-key-recent-card-"] [data-testid="stButton"] button:hover,
+[class*="st-key-category-card-"] [data-testid="stButton"] button:hover,
+[class*="st-key-demo-card-"] [data-testid="stButton"] button:hover {
+  border-color: var(--gold);
+  background: rgba(212, 173, 87, 0.26);
+}
+
+/* Category cards carry no duplicate heading: the button is the card title. */
+[class*="st-key-category-card-"] [data-testid="stButton"] button {
+  justify-content: flex-start;
+  margin: 0.45rem 0 0.6rem;
+  padding-inline: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.34rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+[class*="st-key-category-card-"] [data-testid="stButton"] button:hover {
+  background: transparent;
   color: var(--vermilion);
-  border: 1px solid var(--gilded-gold);
-  padding: 0.6rem 0.35rem;
-  margin: 0.5rem auto 1rem;
+  box-shadow: none;
+  transform: none;
+  text-decoration: underline;
+  text-underline-offset: 0.3rem;
+}
+
+[class*="st-key-demo-card-"] [data-testid="stImage"] {
+  margin: 0.2rem 0 0.6rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: none;
+}
+
+[class*="st-key-demo-card-"] [data-testid="stImage"] img {
+  max-height: 11rem;
+}
+
+.card-index,
+.project-card__meta,
+.demo-card__meta,
+.category-card__note,
+.metric-card__label {
+  color: var(--muted-ink);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  line-height: 1.75;
+}
+
+.card-name,
+.project-card__name,
+.category-card__name,
+.demo-card__title {
+  margin: 0.55rem 0 0.65rem;
+  color: var(--ink);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.34rem;
+  line-height: 1.25;
+}
+
+/* Status tiles reuse the plain card look without the keyed container. */
+.project-card {
+  min-height: 7.55rem;
+  padding: 1.3rem 1.4rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(255, 251, 242, 0.91);
+  box-shadow: var(--shadow-soft);
+}
+
+.status-chip {
   display: inline-block;
-  font-size: 1.05rem;
+  margin-top: 0.5rem;
+  padding: 0.24rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--muted-ink);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
 }
 
-button[kind="primary"] {
-  background-color: var(--vermilion);
-  border-color: var(--vermilion);
-  color: #fff;
+.status-chip--ok {
+  border-color: rgba(18, 63, 53, 0.34);
+  color: var(--ink);
 }
 
-[data-testid="stImage"],
-.edit-surface {
-  background: var(--edit-surface);
-  border: 1px solid var(--edit-border);
+.status-chip--warn {
+  border-color: rgba(200, 59, 43, 0.4);
+  color: #a8352a;
+}
+
+/* Optional-capability readout: one row per extra, with the reason when absent. */
+.capability-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.capability-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 251, 242, 0.7);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.capability-row .status-chip {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.capability-row__note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: right;
+}
+
+/* ------------------------------------------------- 7. Analysis result pieces */
+
+.metric-grid,
+.swatch-grid {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+}
+
+.metric-card {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 251, 242, 0.9);
+  box-shadow: var(--shadow-soft);
+}
+
+.metric-card__value {
+  margin-top: 0.3rem;
+  color: var(--ink-deep);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+.metric-card__note {
+  margin-top: 0.28rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.swatch-grid {
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 251, 242, 0.9);
+}
+
+.swatch__chip {
+  flex: 0 0 auto;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid rgba(40, 50, 58, 0.18);
+  border-radius: var(--radius-xs);
+}
+
+.swatch__hex {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.swatch__meta {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.match-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 251, 242, 0.7);
+}
+
+.match-row:last-child {
+  border-bottom: 0;
+}
+
+.match-row__dot {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid rgba(40, 50, 58, 0.2);
+  border-radius: 999px;
+}
+
+.match-row__name {
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.match-row__meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------- 8. Result panels */
+
+.result-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.55rem 0 0;
+  color: var(--muted-ink);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+}
+
+.result-caption b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.ai-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.42rem;
+  border: 1px solid rgba(200, 59, 43, 0.36);
+  border-radius: 999px;
+  background: rgba(200, 59, 43, 0.08);
+  color: #a8352a;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.empty-state {
+  padding: 1.5rem 1.6rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(255, 251, 242, 0.6);
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.8;
+}
+
+.empty-state b {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--ink);
+  font-family: KaiTi, STKaiti, serif;
+  font-size: 1.12rem;
+}
+
+/* --------------------------------------------------------- 9. Action bars */
+
+/* Rendered through a keyed container so the bar is one bordered strip. */
+[class*="st-key-action-bar-"] {
+  gap: 0.6rem !important;
+  margin-top: 1.4rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 251, 242, 0.86);
+  box-shadow: var(--shadow-soft);
+}
+
+.action-note {
+  align-self: center;
+  color: var(--muted-ink);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.action-note b {
+  color: var(--ink);
+}
+
+/* Confirmation panels before a paid generation call. */
+.confirm-panel {
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(200, 59, 43, 0.34);
+  border-radius: var(--radius-sm);
+  background: rgba(200, 59, 43, 0.055);
+}
+
+.confirm-panel__title {
+  margin-bottom: 0.6rem;
+  color: #a8352a;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.confirm-panel dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 0.9rem;
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.confirm-panel dt {
+  color: var(--muted-ink);
+  letter-spacing: 0.06em;
+}
+
+.confirm-panel dd {
+  margin: 0;
+  color: var(--text);
+}
+
+/* --------------------------------------------- 10. Native widget surfaces */
+
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] {
+  color: #344139 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.025em;
+}
+
+button,
+[data-testid="stButton"] button {
+  min-height: 2.55rem;
+  padding-inline: 1.05rem !important;
+  border-radius: var(--radius-xs) !important;
+  font-weight: 650 !important;
+  box-shadow: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+[data-testid="stButton"] button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+button[kind="primary"],
+[data-testid="stButton"] button[kind="primary"] {
+  background: var(--vermilion) !important;
+  border-color: var(--vermilion) !important;
+  color: #fff8f0 !important;
+  box-shadow: 0 5px 14px rgba(167, 45, 31, 0.18);
+}
+
+[data-testid="stButton"] button:not([kind="primary"]) {
+  border-color: #d9c28b;
+  background: rgba(255, 252, 245, 0.86);
+  color: var(--ink);
+}
+
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stNumberInput"] input,
+[data-baseweb="select"] > div {
+  background: var(--paper-field) !important;
+  border: 1px solid rgba(183, 143, 75, 0.34) !important;
+  border-radius: var(--radius-xs) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus,
+[data-testid="stNumberInput"] input:focus {
+  outline: 2px solid var(--vermilion-soft) !important;
+  outline-offset: 1px;
+}
+
+[data-testid="stNumberInput"] button {
+  min-height: 2.2rem;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--ink) !important;
+}
+
+[data-testid="stFileUploader"] {
+  padding: 0.45rem 0.65rem;
+  border: 1px dashed rgba(183, 143, 75, 0.58);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 251, 242, 0.74);
+}
+
+[data-testid="stExpander"] {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 252, 246, 0.7);
+}
+
+[data-testid="stExpander"] summary {
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+/* Compact multi-select for licensing/rights detail, never a wall of checkboxes. */
+[class*="st-key-check-grid-"] {
+  gap: 0.15rem !important;
+}
+
+/* --------------------------------------------------- 11. Responsive / motion */
+
+@media (max-width: 1100px) {
+  section[data-testid="stSidebar"] {
+    min-width: 17.5rem !important;
+    width: 17.5rem !important;
+  }
+
+  [data-testid="stMainBlockContainer"] {
+    padding: 1.8rem 1.4rem 3rem;
+  }
+
+  .hero {
+    padding: 2rem 1.55rem;
+  }
+
+  .hero h1,
+  .studio-header h1 {
+    font-size: 2.45rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

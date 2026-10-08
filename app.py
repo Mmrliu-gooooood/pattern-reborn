@@ -15,7 +15,7 @@ from pattern_reborn.projects import ProjectRepository
 from pattern_reborn.runtime import RuntimePaths
 from pattern_reborn.ui.home import load_validated_demos, render_home
 from pattern_reborn.ui.studio import render_studio
-from pattern_reborn.ui.theme import render_shell_chrome
+from pattern_reborn.ui.theme import render_shell_chrome, render_sidebar_footer
 from pattern_reborn.workflow import PatternRebornService, WorkflowError
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -25,6 +25,11 @@ load_dotenv(REPO_ROOT / ".env")
 def _workspace_path(paths: RuntimePaths) -> Path:
     override = os.environ.get("PATTERN_REBORN_WORKSPACE")
     return Path(override) if override else paths.workspace
+
+
+def _outputs_path(paths: RuntimePaths) -> Path:
+    override = os.environ.get("PATTERN_REBORN_OUTPUTS")
+    return Path(override) if override else paths.outputs
 
 
 def _demo_root() -> Path:
@@ -95,7 +100,8 @@ def build_runtime(
         directory.mkdir(parents=True, exist_ok=True)
     repository = ProjectRepository(_workspace_path(paths))
     knowledge = KnowledgeCatalog.load(REPO_ROOT / "data" / "knowledge")
-    output_dir = paths.outputs / "generation-cache"
+    outputs = _outputs_path(paths)
+    output_dir = outputs / "generation-cache"
     if _use_resource_cache():
         generation, provider_config = _cached_generation_bundle(str(output_dir))
     else:
@@ -105,7 +111,7 @@ def build_runtime(
         repository,
         knowledge=knowledge,
         generation=generation,
-        export_root=paths.outputs,
+        export_root=outputs,
         mobile_sam_segmenter=_optional_mobile_sam_segmenter(active_capabilities),
     )
     return service, knowledge, provider_config
@@ -129,6 +135,7 @@ def main() -> None:
         capabilities,
         load_validated_demos(_demo_root()),
     )
+    render_sidebar_footer()
 
 
 main()

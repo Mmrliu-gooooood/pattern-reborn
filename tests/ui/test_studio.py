@@ -204,3 +204,127 @@ def test_backward_navigation_keeps_unsaved_generation_prompt(studio_at_generatio
         widget for widget in studio_at_generation.text_area if widget.label == "提示词"
     )
     assert restored.value == "保持莲纹骨架，生成书签纹样"
+
+
+def test_analysis_renders_contour_metrics_without_an_internal_error(studio_at_extraction) -> None:
+    """The analysis step must use the public contour metric field name."""
+    studio_at_extraction.run()
+    step = next(widget for widget in studio_at_extraction.radio if "纹样分析" in widget.options)
+    step.set_value("纹样分析").run()
+
+    next(button for button in studio_at_extraction.button if button.label == "分析").click().run()
+
+    assert not studio_at_extraction.exception
+    assert "轮廓" in all_text(studio_at_extraction)
+
+
+def test_recomposition_renders_canvas_size_controls(studio_at_extraction) -> None:
+    """Parameterised recomposition must remain available after layout changes."""
+    studio_at_extraction.run()
+    step = next(widget for widget in studio_at_extraction.radio if "参数化重组" in widget.options)
+    step.set_value("参数化重组").run()
+
+    assert not studio_at_extraction.exception
+    labels = [widget.label for widget in studio_at_extraction.number_input]
+    assert "画布宽度" in labels
+    assert "画布高度" in labels
+
+
+def test_existing_project_upload_step_shows_summary_not_create_form(studio_at_extraction) -> None:
+    """Existing projects keep their source record instead of reopening creation."""
+    studio_at_extraction.run()
+    step = next(widget for widget in studio_at_extraction.radio if "上传与分类" in widget.options)
+    step.set_value("上传与分类").run()
+
+    assert not studio_at_extraction.exception
+    labels = [button.label for button in studio_at_extraction.button]
+    assert "创建项目" not in labels
+    assert "新建项目" in labels
+    # The read-only summary states the recorded classification and rights in Chinese.
+    text = all_text(studio_at_extraction)
+    assert "品类 · 剪纸" in text
+    assert "来源权利 ·" in text
+    assert "paper_cutting" not in text
+
+
+def test_new_project_from_summary_clears_the_active_project(studio_at_extraction) -> None:
+    studio_at_extraction.run()
+    step = next(widget for widget in studio_at_extraction.radio if "上传与分类" in widget.options)
+    step.set_value("上传与分类").run()
+    next(button for button in studio_at_extraction.button if button.label == "新建项目").click().run()
+    assert not studio_at_extraction.exception
+    assert session_get(studio_at_extraction, "project_id") in (None, "")
+    assert any(button.label == "创建项目" for button in studio_at_extraction.button)
+
+
+def _goto(app, label: str):
+    step = next(widget for widget in app.radio if "上传与分类" in widget.options)
+    step.set_value(label).run()
+    assert not app.exception
+
+
+def _roundtrip_through_upload(app, label: str) -> None:
+    """Leave the step and come back, proving the result came from disk."""
+    _goto(app, "上传与分类")
+    _goto(app, label)
+
+
+def test_analysis_result_is_restored_from_the_project_after_a_rerun(studio_at_extraction) -> None:
+    """Rendering analysis only inside the button branch loses it on every rerun."""
+    studio_at_extraction.run()
+    _goto(studio_at_extraction, "纹样分析")
+    next(button for button in studio_at_extraction.button if button.label == "分析").click().run()
+    assert not studio_at_extraction.exception
+    assert "主色板" in all_text(studio_at_extraction)
+    assert "传统色匹配" in all_text(studio_at_extraction)
+
+    _roundtrip_through_upload(studio_at_extraction, "纹样分析")
+
+    restored = all_text(studio_at_extraction)
+    assert "主色板" in restored
+    assert "轮廓数量" in restored
+    assert any(button.label == "重新分析" for button in studio_at_extraction.button)
+
+
+def test_recomposition_result_is_restored_from_the_project_after_a_rerun(
+    studio_at_extraction,
+) -> None:
+    studio_at_extraction.run()
+    _goto(studio_at_extraction, "纹样分析")
+    next(button for button in studio_at_extraction.button if button.label == "分析").click().run()
+    _goto(studio_at_extraction, "参数化重组")
+    next(button for button in studio_at_extraction.button if button.label == "重组").click().run()
+    assert not studio_at_extraction.exception
+    assert "当前重组纹样" in all_text(studio_at_extraction)
+
+    _roundtrip_through_upload(studio_at_extraction, "参数化重组")
+
+    assert "当前重组纹样" in all_text(studio_at_extraction)
+
+
+def test_mutating_steps_report_success_after_the_rerun(studio_at_extraction) -> None:
+    """A st.success immediately before st.rerun is never seen; use the flash queue."""
+    studio_at_extraction.run()
+    next(button for button in studio_at_extraction.button if button.label == "提取").click().run()
+    assert not studio_at_extraction.exception
+    successes = [str(node.value) for node in studio_at_extraction.success]
+    assert any("提取完成" in value for value in successes), successes
+    assert any(button.label == "确认提取" for button in studio_at_extraction.button)
+
+
+def test_confirmed_extraction_is_redisplayed_after_it_is_confirmed(studio_at_extraction) -> None:
+    studio_at_extraction.run()
+    next(button for button in studio_at_extraction.button if button.label == "提取").click().run()
+    next(button for button in studio_at_extraction.button if button.label == "确认提取").click().run()
+    assert not studio_at_extraction.exception
+    assert "已确认" in all_text(studio_at_extraction)
+    assert "提取结果" in all_text(studio_at_extraction)
+
+
+def test_every_studio_step_renders_exactly_one_h1(studio_at_extraction) -> None:
+    studio_at_extraction.run()
+    for label in STEP_LABELS:
+        _goto(studio_at_extraction, label)
+        markdown = "\n".join(str(node.value) for node in studio_at_extraction.markdown)
+        assert markdown.count("<h1>") == 1, label
+        assert "studio-header" in markdown, label
