@@ -20,6 +20,23 @@ def test_theme_uses_two_non_directional_radial_gradients() -> None:
     assert "linear-gradient" not in css
 
 
+def test_theme_neutralises_streamlit_markdown_container_margin() -> None:
+    """Panels here are raw HTML, so Streamlit's negative markdown margin must go.
+
+    Streamlit ends every markdown block with ``margin-bottom: -1rem`` to cancel a
+    trailing ``<p>`` margin. Blocks composed from ``<div>``s have no such margin,
+    so the negative value silently shortened the container by 16px and the next
+    element (a card image, a card button) was painted over the text.
+    """
+    css = CSS_PATH.read_text(encoding="utf-8")
+    container_rule = css.split('[data-testid="stMarkdownContainer"] {', 1)[1].split("}", 1)[0]
+    assert "margin-bottom: 0 !important" in container_rule
+    trailing_paragraph = css.split(
+        '[data-testid="stMarkdownContainer"] > p:last-child {', 1
+    )[1].split("}", 1)[0]
+    assert "margin-bottom: 0 !important" in trailing_paragraph
+
+
 def test_ruyi_cloud_svg_is_original_project_asset() -> None:
     svg = SVG_PATH.read_text(encoding="utf-8")
     assert "Pattern Reborn original asset" in svg
