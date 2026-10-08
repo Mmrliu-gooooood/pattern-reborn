@@ -64,6 +64,10 @@ from pattern_reborn.vectorize import Vectorizer
 
 _PALETTE_SEED = 20260829
 
+# Profiles whose segmenter cannot run without a region, so a project's recorded
+# region is applied automatically for them and only for them.
+PROFILES_REQUIRING_REGION = frozenset({ProfileId.ARTIFACT_PHOTO})
+
 
 class WorkflowError(ValueError):
     """工作流步骤无法安全完成。"""
@@ -236,7 +240,7 @@ class PatternRebornService:
         source_alpha = np.ascontiguousarray(source_rgba[:, :, 3])
         processed = enhance(rgb, command.preprocess)
         hints = command.hints if command.hints is not None else SegmentHints()
-        hints = _with_recorded_hint_box(project, working, hints)
+        hints = _with_recorded_hint_box(project, working, hints, command.profile)
         result = segmenter.segment(processed, command.profile, hints)
         mask = result.mask
         if command.strokes:
@@ -556,16 +560,20 @@ def _current_mockup_artwork_ids(project: ProjectRecord) -> set[str]:
 
 
 def _with_recorded_hint_box(
-    project: ProjectRecord, working: Image.Image, hints: SegmentHints
+    project: ProjectRecord, working: Image.Image, hints: SegmentHints, profile: ProfileId
 ) -> SegmentHints:
     """Apply the project's recorded region when the caller supplied no box.
 
-    Bundled demo cases document the region worth extracting as fractions of the
+    Bundled demo cases document a region worth extracting as fractions of the
     image. The segmenter runs on the working copy, whose size is set by the
     decode budget rather than by the source's own dimensions, so the fractions
     are converted here rather than in the UI. An explicit box always wins.
+
+    Only profiles whose algorithm is region-based consume it. For the others the
+    recorded region is a craft crop rather than a segmentation constraint, and
+    masking the extraction to it throws away most of the motif.
     """
-    if hints.box is not None:
+    if hints.box is not None or profile not in PROFILES_REQUIRING_REGION:
         return hints
     box = normalized_box_to_pixels(
         project.processing_parameters.get("hint_box"), working.size

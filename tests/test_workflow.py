@@ -126,6 +126,32 @@ def test_explicit_hints_win_over_the_region_recorded_on_the_project(
     assert reloaded.processing_parameters["pending_extraction"]["hints"]["box"] == [40, 30, 400, 300]
 
 
+def test_extract_ignores_the_recorded_region_for_whole_image_profiles(
+    app_service, tmp_path: Path
+) -> None:
+    """A craft crop is not a segmentation constraint.
+
+    The silhouette profile segments the whole frame; masking it to a case's
+    recorded crop threw away most of the motif (opaque pixels fell from 27% to
+    3% on the lotus paper-cut case).
+    """
+    source = _write_large_motif(tmp_path / "silhouette.png", size=(800, 600))
+    project = app_service.create_project(
+        CreateProjectCommand(
+            name="整幅提取",
+            source=source,
+            category=CategoryId.PAPER_CUTTING,
+            provenance=ProvenanceClass.USER_SUPPLIED_UNVERIFIED,
+            hint_box=(0.25, 0.25, 0.75, 0.75),
+        )
+    )
+
+    app_service.extract(project.id, ExtractCommand(profile=ProfileId.SILHOUETTE))
+
+    reloaded = app_service.load_project(project.id)
+    assert reloaded.processing_parameters["pending_extraction"]["hints"]["box"] is None
+
+
 def test_extract_without_a_region_names_the_fields_to_fill(app_service, source_fixture: Path) -> None:
     project = _create(app_service, source_fixture)
 

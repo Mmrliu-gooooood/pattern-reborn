@@ -19,7 +19,12 @@ from pattern_reborn.ui.presenters import (
     source_path,
 )
 from pattern_reborn.ui.steps.context import StudioContext
-from pattern_reborn.workflow import ExtractCommand, SegmentationBackend, WorkflowError
+from pattern_reborn.workflow import (
+    PROFILES_REQUIRING_REGION,
+    ExtractCommand,
+    SegmentationBackend,
+    WorkflowError,
+)
 
 _BACKEND_LABELS = {"OpenCV": SegmentationBackend.OPENCV, "MobileSAM": SegmentationBackend.MOBILE_SAM}
 _STROKE_WIDTH_KEY = "extraction_stroke_width"
@@ -143,7 +148,7 @@ def _render_controls(context: StudioContext, project, canvas_active: bool) -> _C
 
     ui.render_divider()
     ui.render_kicker("手动坐标", "MANUAL GEOMETRY")
-    recorded = _recorded_region_note(project)
+    recorded = _recorded_region_note(context, project)
     if recorded:
         ui.render_note(recorded)
     box, points = _render_coordinate_inputs()
@@ -170,8 +175,14 @@ def _render_controls(context: StudioContext, project, canvas_active: bool) -> _C
     )
 
 
-def _recorded_region_note(project) -> str:
-    """Say that a documented region will be used, so the result is never a surprise."""
+def _recorded_region_note(context: StudioContext, project) -> str:
+    """Say that a documented region will be used, so the result is never a surprise.
+
+    Only region-based profiles consume it; for the others the case's region is a
+    craft crop, and announcing it would promise something the run will not do.
+    """
+    if context.knowledge.profile_for(project.category).id not in PROFILES_REQUIRING_REGION:
+        return ""
     box = project.processing_parameters.get("hint_box")
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return ""
