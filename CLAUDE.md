@@ -2,19 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current product direction (2026-10-21)
+
+Read `docs/product/README.md` and `docs/product/roadmap.md`: a complete local personal creation workspace first, with later distribution and online access. Competition specifications and plans under `docs/superpowers/` are historical rather than the authority for future scope.
+
+The commands, architecture and UI below describe the existing implementation. Current Windows/Python/Streamlit requirements apply when running it, not as a permanent prohibition on a designed frontend or deployment migration. Six steps, workbench proportions, fonts, colors, gradients and exact widget positions may change with the new design. Update affected UI tests alongside implementation; preserve meaningful behavior, persistence and safety tests.
+
+The independent React frontend lives in `web/`, with a loopback FastAPI adapter in `src/pattern_reborn/web_api.py`; see `docs/product/web-workspace.md`. It now covers library/duplicate/backup/import, extraction and analysis, recomposition/palette undo-redo, draft autosave/recovery, named versions/compare/restore, provider settings and asynchronous generation jobs, mockups and exports. Keep the existing Streamlit workflow. Schema version 1 is unchanged; web metadata is namespaced under `processing_parameters.web_workspace`, and draft/snapshot/recovery sidecars live in each project's `.web-workspace/`. Preserve source immutability, path containment, resource limits, atomic publication and secret handling. This local implementation does not authorize deployment or test calls to paid providers.
+
+For local delivery, read `docs/product/local-release.md`: install into project `.venv`, package allow-listed source plus the prebuilt frontend, diagnose without revealing secrets, and upgrade into a new directory while retaining the previous installation. The release ZIP requires Python 3.11 and dependencies; it is not a standalone EXE. Fresh Windows installs and real paid calls have not been tested. No project LICENSE has been specified; third-party notices do not grant permission to publish the project's own code.
+
 ## What this is
 
-A Windows-local Streamlit studio for **traceable** Chinese traditional-pattern projects: upload → extract → analyze → recompose → optionally AI-generate → mockup → export with provenance. Everything except paid image generation runs offline.
+A Windows-local React/FastAPI workbench and retained Streamlit studio for **traceable** Chinese traditional-pattern projects: upload → extract → analyze → recompose → optionally AI-generate → mockup → export with provenance. After dependency installation, core creation runs offline; remote generation requires explicit per-request consent.
 
-Hard platform constraints: **Windows x64, Python 3.11 only** (`requires-python = ">=3.11,<3.12"`), no Docker/WSL/database/global Node. Never install into a global Python — always use `.venv`.
+Current runtime constraints: **Windows x64, Python 3.11 only** (`requires-python = ">=3.11,<3.12"`). The current app needs no Docker/WSL/database/global Node; a future architecture may introduce project-local dependencies through an explicit migration. Never install into a global Python — always use `.venv`.
 
 ## Commands
 
-All wrapper scripts set `PIP_CACHE_DIR`, `HF_HOME`, `TORCH_HOME`, `XDG_CACHE_HOME`, `TEMP`, `TMP` into the drive-local `.cache\` tree and create `models\`, `workspace\`, `outputs\`. Run them from the repository root.
+The bootstrap/test/install wrappers direct their dependency caches and temporary files into drive-local `.cache\`; web startup also uses local temp storage. Run commands from the repository root. Do not install into global Python.
 
 ```powershell
 # One-time bootstrap (requires Python 3.11; fails if .venv exists with another version)
 powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+
+# Local React source release (prebuilt frontend); Python 3.11 x64 only
+powershell -ExecutionPolicy Bypass -File scripts\install-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\install-local.ps1 -CheckOnly
+powershell -ExecutionPolicy Bypass -File scripts\diagnose-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\release-local.ps1
+# From Git sources: install .[web], npm ci in web, then run-web.ps1 -Build
 
 # Full test suite (defaults to tests/ via pyproject testpaths)
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1 -q
@@ -50,6 +68,10 @@ Layers, in dependency order (UI → service → processing/persistence → domai
 |---|---|
 | `app.py` | Streamlit composition root. Builds `RuntimePaths`, `ProjectRepository`, `KnowledgeCatalog`, `GenerationService`, lazy MobileSAM; dispatches home vs studio on `st.session_state["route"]`; calls `main()` at import. |
 | `src/pattern_reborn/ui/` | Streamlit-only rendering; no processing logic. See *UI structure* below. |
+| `web/src/` / `web_api.py` | React workbench and same-origin loopback routes; extraction/design preview-save-export adapters and revision guards. |
+| `web_extraction.py` | Bounded auto/OpenCV/color/whole/local MobileSAM selection; optional cleanup before manual strokes, original RGB/alpha preservation and Chinese guidance. |
+| `web_projects.py` | Disk drafts, immutable snapshots, two-version comparison data, backup-before-restore, project duplicate and complete ZIP import/export with path/hash/resource checks; corrupt-record recovery from valid snapshots. |
+| `web_creative.py` | Analysis, session-only provider settings/keys, per-call paid consent, in-memory job status/dedup/cancellation, revision-safe generation publication, mockups and creative exports. |
 | `workflow.py` | `PatternRebornService` — framework-independent six-step orchestration and all artifact I/O under a project dir. |
 | `projects.py` | `ProjectRepository` — on-disk project folders, atomic `project.json`, source copy + SHA-256, `confirm()` stale-marking, path containment. |
 | `domain.py` | Pure pydantic models/enums: `CategoryId`, `ProfileId`, `ProvenanceClass`, `StepId`, `ArtifactKind`, `ProjectRecord`, `SourceRecord`, `ArtifactIndex`, `GenerationRecord`. |
@@ -60,6 +82,10 @@ Layers, in dependency order (UI → service → processing/persistence → domai
 | `generation/` | `base.py` provider-neutral contracts; `service.py` `GenerationService` + credential resolution; `http.py` error mapping; `seedream.py` / `qwen.py` adapters. |
 
 ### UI structure
+
+The table below describes retained Streamlit modules. React composition is in `web/src/App.jsx`, with `Library`, `Editor`, `Workspace`, `Creative`, `Settings` and `ProjectTools`; `useDraft.js` synchronizes browser and disk draft copies. Drafts do not publish extraction/design artifacts; stale drafts require explicit handling. Keys never enter browser storage. Job/dedup/session state is in backend memory and does not survive restart; published artifacts do.
+
+Use one backend process per workspace. The local `RLock` and revision checks do not provide cross-process locking with another FastAPI or Streamlit process. Cancellation prevents publishing generated results but cannot guarantee that an already submitted provider request stops or avoids billing.
 
 | File | Owns |
 |---|---|

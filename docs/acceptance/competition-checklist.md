@@ -1,5 +1,7 @@
 # Competition acceptance checklist
 
+> 历史验收记录：以下结果来自 2026-08-30，不代表当前版本已重新验证。自 2026-10-21 起，未来发布以[产品化基线](../product/README.md)与新验收要求为准。
+
 Dated evidence for Pattern Reborn MVP. Headed Streamlit was not left running. Live paid credentials were not loaded or recorded.
 
 1. Clean Windows bootstrap and drive-local cache inspection. **Date: 2026-08-30.** `scripts\bootstrap.ps1` and `scripts\run.ps1` set `PIP_CACHE_DIR`, `HF_HOME`, `TORCH_HOME`, `XDG_CACHE_HOME`, `TEMP`, and `TMP` under the repository `.cache\` tree. Smoke start used `.\.venv\Scripts\python.exe -m streamlit` with `--server.address=127.0.0.1`. Cache directories `.cache\pip`, `.cache\huggingface`, `.cache\torch`, `.cache\xdg`, and `.cache\tmp` exist on the worktree drive. No global `pip` was used.

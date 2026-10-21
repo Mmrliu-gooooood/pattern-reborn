@@ -1,5 +1,7 @@
 # Pattern Reborn Generation Hardening Implementation Plan
 
+> 历史文档（2026-10-21 标记）：本文记录比赛阶段的设计或实施计划，不再定义当前产品范围。请以[产品化基线](../../product/README.md)为准。原始内容保留供追溯；数据完整性、来源与密钥保护要求继续有效。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Seedream/Qwen requests faithful, provider-isolated, diagnosable, and resistant to accidental duplicate paid calls.

@@ -1,5 +1,7 @@
 # Pattern Reborn Design Specification
 
+> 历史文档（2026-10-21 标记）：本文记录比赛阶段的设计或实施计划，不再定义当前产品范围。请以[产品化基线](../../product/README.md)为准。原始内容保留供追溯；数据完整性、来源与密钥保护要求继续有效。
+
 **Chinese product name:** 纹启新生——非遗纹样智能提取与再设计平台  
 **English product name:** Pattern Reborn  
 **Repository:** `D:\code\ican\pattern-reborn`  

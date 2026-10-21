@@ -28,6 +28,8 @@ dist/
 .worktrees/
 .idea/
 .vscode/
+node_modules/
+web/dist/
 
 # Superpowers visual brainstorming artifacts
 .superpowers/
