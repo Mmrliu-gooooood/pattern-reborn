@@ -39,13 +39,13 @@ powershell -ExecutionPolicy Bypass -File scripts\diagnose-local.ps1
 
 选色坐标、选区与笔触均以方向已校正的工作图像素为准。小区域过滤、填孔、平滑先于手动画笔运行，画笔修正在最后应用。填孔会封闭剪纸镂空，平滑可能损失细线，默认关闭。柔化只作用于 RGBA 边缘，分析蒙版仍为二值；任何模式都不能恢复源图本已透明的像素。复杂纹理、细线、镂空、同色背景都需要目视检查，算法返回成功不等于已完成精修。
 
-导入、提取、重组、配色、文创与常规导出在依赖安装后可离线运行。AI 生图需要用户主动触发远程供应商请求，会使用网络并可能计费；密钥应通过本机配置或会话输入，不放进项目、程序发行包或截图。可选 MobileSAM 是本地处理，与远程 AI 生图是不同功能。
+导入、提取、重组、配色、文创与常规导出在依赖安装后可离线运行。AI 生图需要用户主动触发远程供应商请求，会使用网络并可能计费；密钥通过本机设置（Windows 当前用户加密）或本地环境配置，不放进项目、程序发行包或截图。可选 MobileSAM 是本地处理，与远程 AI 生图是不同功能。
 
 ## 备份、恢复与升级
 
 三种 ZIP 用途不同：程序源码包安装应用；项目备份包用于项目迁移与恢复；作品导出包用于交付图像和来源说明，不能代替完整项目备份。使用工作台提供的项目备份/导入功能时，应检查原图、版本及项目记录是否一并恢复。恢复到新项目后先核对预览，再继续编辑。
 
-完整本机备份：停止服务，复制整个 `workspace/`、`outputs/`、`models/`、`config/` 及私有 `.env`、`.streamlit/secrets.toml` 到自己的安全目录。备份中的密钥文件和私有素材同样敏感，不随问题反馈公开。若设置 `PATTERN_REBORN_WORKSPACE` 或 `PATTERN_REBORN_OUTPUTS` 指向外部目录，也要单独备份这些目录。诊断和升级脚本不读取环境变量中的密钥值。
+完整本机备份：停止服务，复制整个 `workspace/`、`outputs/`、`models/`、`config/`、`.private/` 及私有 `.env`、`.streamlit/secrets.toml` 到自己的安全目录。备份中的密钥文件和私有素材同样敏感，不随问题反馈公开。若设置 `PATTERN_REBORN_WORKSPACE` 或 `PATTERN_REBORN_OUTPUTS` 指向外部目录，也要单独备份这些目录。诊断和升级脚本不读取环境变量中的密钥值。
 
 升级使用新目录，保留旧目录作回退：
 
@@ -70,7 +70,7 @@ powershell -ExecutionPolicy Bypass -File scripts\release-local.ps1
 powershell -ExecutionPolicy Bypass -File scripts\release-local.ps1 -Build -NodeExecutable D:\runtime\node.exe
 ```
 
-输出到忽略的 `dist/local/`。ZIP 有唯一版本名、前端成品、源码、使用说明、文件 SHA-256 manifest、依赖版本与许可证文本，旁边附 ZIP SHA-256 文件。包中不含 `.venv`、缓存、用户工作区、成果、模型权重、私有 `.env` 或未提交补丁；Node/Python 依赖二进制也不随包提供。制作脚本不发布到 GitHub、Vercel 或其他服务。
+输出到忽略的 `dist/local/`。ZIP 有唯一版本名、前端成品、源码、使用说明、文件 SHA-256 manifest、依赖版本与许可证文本，旁边附 ZIP SHA-256 文件。包中不含 `.venv`、缓存、用户工作区、成果、模型权重、私有 `.env`、`.private/` 或未提交补丁；Node/Python 依赖二进制也不随包提供。制作脚本不发布到 GitHub、Vercel 或其他服务。
 
 仓库当前没有项目自身的 `LICENSE`，第三方声明不等于项目授权。本地程序包仅用于已有授权范围内的使用；公开再分发前需由权利人明确项目许可，并核对示例素材、字体、图标和其他第三方许可证。发行包的 `licenses/` 保存构建环境可取得的许可证原文，示例素材归属见 `THIRD_PARTY_NOTICES.md` 与 `data/demo/` 的元信息。
 
@@ -79,3 +79,5 @@ powershell -ExecutionPolicy Bypass -File scripts\release-local.ps1 -Build -NodeE
 2026-10-21 在 Windows、Python 3.11.9 x64 验证脚本语法、现有 `.venv` 依赖检查与诊断；实际生成程序 ZIP、核对全部文件校验值、验证私有文件排除及许可证文本。在新的临时程序目录中启动真实后端与前端，并验证升级复制工作区、成果、模型和私有配置、保留旧目录。临时程序沿用了本机已安装的 Python 依赖；尚未在全新 Windows 系统上重新联网安装全部依赖，不据此承诺免环境安装。
 
 自动测试覆盖取色/笔触边界、透明度、清理后画笔优先、ZIP 路径与 manifest 校验。固定随机种子的“灰色纹理背景 + 红色剪纸 + 镂空”合成图，OpenCV 基线 IoU 为 0.113，自动和选色为 1.0；这只说明此回归样本通过，不代表任意实拍图片的质量。真实复杂照片仍需人工验收。
+
+服务设置文件 `.private/provider-settings.json` 在同机升级时随私有目录复制，源码发行和项目备份均排除它。Windows DPAPI 与原机器和 Windows 用户绑定；复制到其他电脑或用户后，需安全备份并移走旧设置文件，重新输入密钥。不要将私有目录随诊断或问题反馈上传。旧目录仍保留作回退。

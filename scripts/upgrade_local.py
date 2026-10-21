@@ -66,7 +66,7 @@ def upgrade(archive_path: Path, source: Path, destination: Path) -> Path:
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("xb") as stream:
                 stream.write(archive.read(item))
-    for name in ("workspace", "outputs", "models", "config"):
+    for name in ("workspace", "outputs", "models", "config", ".private"):
         directory = source / name
         if directory.is_dir():
             _copy_tree_without_links(directory, destination / name)

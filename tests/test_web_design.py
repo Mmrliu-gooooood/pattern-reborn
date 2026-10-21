@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 def studio(tmp_path, monkeypatch):
     monkeypatch.setenv('PATTERN_REBORN_OUTPUTS', str(tmp_path / 'outputs'))
     workspace = tmp_path / 'projects'
-    with TestClient(create_app(workspace), headers=HEADERS) as client:
+    with TestClient(create_app(workspace, settings_path=workspace.parent / 'private/settings.json'), headers=HEADERS) as client:
         project, original = upload(client)
         path = f'/api/projects/{project["id"]}'
         response = client.post(path+'/save', json=edit(project))
@@ -38,7 +38,7 @@ def test_composition_roundtrip_and_snapshot(studio, layout):
     saved = saved.json()
     assert saved['has_pattern']
     assert client.post(path+'/design/save',json=data).status_code == 409
-    with TestClient(create_app(workspace), headers=HEADERS) as reopened:
+    with TestClient(create_app(workspace, settings_path=workspace.parent / 'private/settings.json'), headers=HEADERS) as reopened:
         assert reopened.get(path+'/design').json()['settings'] == settings
         response = reopened.post(path+'/exports',json={'revision':saved['revision'],'format':'png','source':'pattern'})
         assert response.status_code == 200, response.text

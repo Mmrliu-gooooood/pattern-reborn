@@ -1,4 +1,4 @@
-"""Offline tests of paid-job boundaries, session settings and actual artifacts."""
+"""Offline tests of paid-job boundaries, local settings and actual artifacts."""
 from datetime import UTC, datetime
 from io import BytesIO
 import json
@@ -56,12 +56,12 @@ class Adapter:
 
     def factory(self, *, config, output_dir):
         self.config, self.output = config, output_dir
-        return GenerationService({ProviderId.SEEDREAM: self, ProviderId.QWEN: self}, ProviderConfigCredentialResolver(config), config=config)
+        return GenerationService({identifier: self for identifier in ProviderId}, ProviderConfigCredentialResolver(config), config=config)
 
 
 @pytest.fixture
 def creative(tmp_path, monkeypatch):
-    for key in ("SEEDREAM_API_KEY", "QWEN_API_KEY", "SEEDREAM_BASE_URL", "QWEN_BASE_URL", "SEEDREAM_MODEL", "QWEN_MODEL"):
+    for key in ("SEEDREAM_API_KEY", "QWEN_API_KEY", "SEEDREAM_BASE_URL", "QWEN_BASE_URL", "SEEDREAM_MODEL", "QWEN_MODEL", "OPENROUTER_API_KEY", "CUSTOM_API_KEY", "OPENROUTER_BASE_URL", "CUSTOM_BASE_URL", "OPENROUTER_MODEL", "CUSTOM_MODEL"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("PATTERN_REBORN_DISABLE_OPTIONAL", "1")
     repository = ProjectRepository(tmp_path / "projects")
@@ -118,11 +118,11 @@ def creative(tmp_path, monkeypatch):
             raise OSError("Fake snapshot disk failure")
 
     register_creative_routes(app, repository, catalog, lock, current, public, safe_artifact, output,
-                             generation_factory=adapter.factory, auto_snapshot=capture)
+                             generation_factory=adapter.factory, auto_snapshot=capture, settings_path=tmp_path / '.private/provider-settings.json')
     with TestClient(app) as client:
         yield {"client": client, "app": app, "repository": repository, "service": service,
                "project": public(project), "adapter": adapter, "output": output, "original": original,
-               "snapshots": snapshots, "snapshot_fail": snapshot_fail}
+               "snapshots": snapshots, "snapshot_fail": snapshot_fail, "settings_path": tmp_path / '.private/provider-settings.json'}
     adapter.release.set()
 
 
@@ -133,7 +133,10 @@ def setup_key(state):
 
 
 def payload(state, **updates):
+    settings = state['client'].get('/api/settings').json()
+    revision = next(p['settings_revision'] for p in settings['providers'] if p['id'] == updates.get('provider', 'seedream'))
     return {"revision": state["project"]["revision"], "request_id": "test-request-1", "provider": "seedream",
+            "settings_revision": revision,
             "prompt": "传统牡丹纹样", "size": "1024x1024", "structure_level": "high",
             "target_application": "textile", "colors": ["#B71C1C"], "mode": "byok", "paid_confirmed": True, **updates}
 
@@ -159,7 +162,7 @@ def wait_job(state, job):
     pytest.fail("Fake generation did not finish")
 
 
-def test_settings_keys_are_session_only_and_invalid_inputs_never_echo_them(creative):
+def test_settings_keys_are_local_and_invalid_inputs_never_echo_them(creative):
     cookie = creative["client"].get("/api/settings").headers["set-cookie"]
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie
     result = setup_key(creative)
@@ -169,7 +172,7 @@ def test_settings_keys_are_session_only_and_invalid_inputs_never_echo_them(creat
     assert SECRET not in json.dumps(result)
     with TestClient(creative["app"]) as other:
         providers = other.get("/api/settings").json()["providers"]
-        assert not any(p["session_credential"] for p in providers)
+        assert next(p for p in providers if p['id'] == 'seedream')['stored_credential']
     invalid = creative["client"].put("/api/settings", json={"provider": "seedream", "api_key": SECRET, "base_url": "https://user:secret@example.org"})
     assert invalid.status_code == 400 and SECRET not in invalid.text and "user:secret" not in invalid.text
     for path in creative["repository"].workspace.rglob("*.json"):
@@ -261,7 +264,7 @@ def test_view_analysis_after_generation_and_mockup_preserves_current_artworks(cr
 
 def test_real_output_publish_provider_overrides_source_unchanged_and_duplicate(creative):
     setup_key(creative)
-    settings = creative["client"].put("/api/settings", json={"provider": "seedream", "base_url": "https://provider.example/v1", "model": "test-model"})
+    settings = creative["client"].put("/api/settings", json={"provider": "seedream", "base_url": "https://provider.example/v1", "model": "test-model", "api_key": SECRET})
     assert settings.status_code == 200
     response, data = submit(creative)
     assert response.status_code == 202, response.text
@@ -286,6 +289,7 @@ def test_real_output_publish_provider_overrides_source_unchanged_and_duplicate(c
     record = creative["repository"].load(creative["project"]["id"])
     assert StepId.GENERATION in record.confirmed_steps
     assert record.processing_parameters["generation"]["mode"] == "byok"
+    assert record.processing_parameters['web_workspace']['creative_generations'][record.artifacts.generation[0]]['protocol'] == 'seedream_images'
     assert [label for label, _ in creative["snapshots"]] == ["AI 生成前的状态", "AI 生成作品保存"]
     assert not creative["snapshots"][0][1]["generations"] and len(creative["snapshots"][1][1]["generations"]) == 1
     assert SECRET not in json.dumps(creative["snapshots"])
@@ -328,6 +332,8 @@ def test_qwen_negative_and_color_controls_reach_provider_and_provenance(creative
     assert wait_job(creative, response.json()["job"])["job"]["status"] == "succeeded"
     request = creative["adapter"].calls[0][0]
     assert request.negative_constraints == "不要文字" and request.colors == [color]
+    project = creative['repository'].load(creative['project']['id'])
+    assert project.processing_parameters['web_workspace']['creative_generations'][project.artifacts.generation[0]]['protocol'] == 'qwen_multimodal'
     record = creative["repository"].load(creative["project"]["id"])
     metadata = record.processing_parameters["web_workspace"]["creative_generations"][record.generations[0].artifact_path]
     assert metadata["negative_constraints"] == "不要文字" and metadata["colors"] == [color]
@@ -488,17 +494,18 @@ def test_mockup_export_provenance_history_and_stale_artwork_allowlist(creative):
     assert creative["client"].get(endpoint + "/artwork/arbitrary-path-token").status_code == 404
 
 
-def test_real_web_app_generation_mockup_download_and_zip_roundtrip(creative, monkeypatch):
+@pytest.mark.parametrize('provider,size', [('seedream', '1024x1024'), ('custom', '1024x1024'), ('openrouter', '1K')])
+def test_real_web_app_generation_mockup_download_and_zip_roundtrip(creative, monkeypatch, provider, size):
     import pattern_reborn.web_creative as routes
     from pattern_reborn.web_api import create_app
 
     monkeypatch.setattr(routes, "build_generation_service", creative["adapter"].factory)
     monkeypatch.setenv("PATTERN_REBORN_OUTPUTS", str(creative["output"]))
     endpoint = f'/api/projects/{creative["project"]["id"]}'
-    with TestClient(create_app(creative["repository"].workspace), headers={"X-Pattern-Reborn": "local-workspace"}) as client:
+    with TestClient(create_app(creative["repository"].workspace, settings_path=creative['settings_path']), headers={"X-Pattern-Reborn": "local-workspace"}) as client:
         state = {**creative, "client": client, "project": client.get(endpoint).json()}
-        setup_key(state)
-        response, _ = submit(state)
+        assert client.put('/api/settings', json={'provider': provider, 'api_key': SECRET}).status_code == 200
+        response, _ = submit(state, provider=provider, size=size)
         assert response.status_code == 202, response.text
         result = wait_job(state, response.json()["job"])
         assert result["job"]["status"] == "succeeded", result
@@ -529,3 +536,8 @@ def test_real_web_app_generation_mockup_download_and_zip_roundtrip(creative, mon
                     manifest = json.loads(archive.read("manifest.json"))
                     assert any(f["kind"] == "mockup" and f["ai_assisted"] for f in manifest["files"])
                     assert SECRET.encode() not in b"".join(archive.read(p) for p in archive.namelist())
+        backup = client.get(endpoint + '/backup')
+        assert backup.status_code == 200
+        with ZipFile(BytesIO(backup.content)) as archive:
+            assert not any('.private' in name or 'provider-settings' in name for name in archive.namelist())
+            assert SECRET.encode() not in b''.join(archive.read(name) for name in archive.namelist())

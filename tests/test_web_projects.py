@@ -468,7 +468,7 @@ def test_real_app_save_draft_history_export_backup_restore_flow(tmp_path, monkey
     from tests.test_web_api import HEADERS, edit, upload
     monkeypatch.setenv("PATTERN_REBORN_OUTPUTS", str(tmp_path / "exports"))
     root = tmp_path / "workspace"
-    with TestClient(create_app(root), headers=HEADERS) as client:
+    with TestClient(create_app(root, settings_path=tmp_path / 'private/settings.json'), headers=HEADERS) as client:
         project, original = upload(client)
         base = f"/api/projects/{project['id']}"
         initial = project["revision"]

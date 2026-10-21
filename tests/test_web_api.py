@@ -46,7 +46,7 @@ def test_after_snapshot_failure_reports_saved_revision(workspace, monkeypatch):
             return original(project, label)
         return capture
     monkeypatch.setattr(module, "register_project_routes", failing_snapshot)
-    with TestClient(module.create_app(workspace), headers=HEADERS) as client:
+    with TestClient(module.create_app(workspace, settings_path=workspace.parent / 'private/settings.json'), headers=HEADERS) as client:
         project, _ = upload(client)
         path = f'/api/projects/{project["id"]}'
         response = client.post(path + "/save", json=edit(project))
@@ -64,7 +64,7 @@ def workspace(tmp_path):
 
 @pytest.fixture
 def client(workspace):
-    with TestClient(create_app(workspace), headers=HEADERS) as client:
+    with TestClient(create_app(workspace, settings_path=workspace.parent / 'private/settings.json'), headers=HEADERS) as client:
         yield client
 
 
@@ -97,7 +97,7 @@ def test_upload_edit_save_reopen_download_preserves_original(client, workspace):
     assert response.status_code == 200, response.text
     saved = response.json()
     assert saved["has_result"] and saved["revision"] != project["revision"]
-    with TestClient(create_app(workspace), headers=HEADERS) as reopened:
+    with TestClient(create_app(workspace, settings_path=workspace.parent / 'private/settings.json'), headers=HEADERS) as reopened:
         detail = reopened.get(path).json()
         assert {k: detail["draft"][k] for k in data if k != "revision"} == {k: v for k, v in data.items() if k != "revision"}
         assert detail["draft"]["extraction"]["mode"] == "auto"

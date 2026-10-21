@@ -15,6 +15,9 @@ from pydantic import SecretStr
 
 from pattern_reborn.generation.base import FailureKind, GenerationFailure
 from pattern_reborn.images import ImageValidationError, probe_image, save_png_atomic
+from pattern_reborn.limits import MAX_SOURCE_PIXELS, ImageLimitError, require_bounded_size
+
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 
 USER_MESSAGE_ZH: dict[FailureKind, str] = {
     FailureKind.AUTH: "身份验证失败，请检查访问凭证。",
@@ -108,38 +111,41 @@ def post_json(
     url: str,
     payload: dict[str, object],
     credential: SecretStr,
+    *, timeout: float = 60.0,
 ) -> httpx.Response:
+    return bounded_request(client, "POST", url, json=payload, headers=authorization_headers(credential), timeout=timeout)
+
+
+def bounded_request(client: httpx.Client, method: str, url: str, *, timeout: float = 60.0, **kwargs) -> httpx.Response:
+    """Read decoded response bytes under a bound, without forwarding redirects."""
     try:
-        response = client.post(
-            url,
-            json=payload,
-            headers=authorization_headers(credential),
-            timeout=60.0,
-        )
+        with client.stream(method, url, timeout=timeout, follow_redirects=False, **kwargs) as response:
+            chunks, size = [], 0
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > MAX_RESPONSE_BYTES:
+                    raise_mapped(FailureKind.MALFORMED)
+                chunks.append(chunk)
+            content = b"".join(chunks)
+            status = response.status_code
+            headers = dict(response.headers)
+            headers.pop("content-encoding", None)
+            headers.pop("content-length", None)
+            result = httpx.Response(status, headers=headers, content=content, request=response.request)
     except httpx.TimeoutException:
         raise_mapped(FailureKind.TIMEOUT)
     except httpx.RequestError:
         raise_mapped(FailureKind.MALFORMED)
-    if response.status_code >= 400:
+    if status >= 300:
         raise_mapped(
-            classify_http_error(response.status_code, response.text),
-            str(response.status_code),
+            classify_http_error(status, result.text),
+            str(status),
         )
-    return response
+    return result
 
 
 def download_bytes(client: httpx.Client, url: str) -> bytes:
-    try:
-        response = client.get(url, timeout=60.0)
-    except httpx.TimeoutException:
-        raise_mapped(FailureKind.TIMEOUT)
-    except httpx.RequestError:
-        raise_mapped(FailureKind.MALFORMED)
-    if response.status_code >= 400:
-        raise_mapped(
-            classify_http_error(response.status_code, response.text),
-            str(response.status_code),
-        )
+    response = bounded_request(client, "GET", url)
     content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type and not content_type.startswith("image/") and content_type != "application/octet-stream":
         raise_mapped(FailureKind.MALFORMED)
@@ -161,9 +167,11 @@ def decode_image_value(value: str, client: httpx.Client) -> bytes:
 def persist_generated_png(data: bytes, output_dir: Path, stem: str) -> Path:
     try:
         with Image.open(BytesIO(data)) as image:
+            require_bounded_size(image.width, image.height, label="生成图像尺寸",
+                                 max_edge=MAX_SOURCE_PIXELS, max_pixels=MAX_SOURCE_PIXELS)
             image.load()
             copy = image.copy()
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (UnidentifiedImageError, OSError, ValueError, ImageLimitError, Image.DecompressionBombError):
         raise_mapped(FailureKind.MALFORMED)
     destination = output_dir / f"{stem}-{uuid4().hex}.png"
     try:

@@ -9,7 +9,12 @@
       "api_key_env": "SEEDREAM_API_KEY",
       "base_url_env": "SEEDREAM_BASE_URL",
       "model_env": "SEEDREAM_MODEL",
-      "size_options": ["2K", "4K", "1024x1024", "2048x2048"]
+      "size_options": [
+        "2K",
+        "4K",
+        "1024x1024",
+        "2048x2048"
+      ]
     },
     {
       "id": "qwen",
@@ -19,7 +24,39 @@
       "api_key_env": "QWEN_API_KEY",
       "base_url_env": "QWEN_BASE_URL",
       "model_env": "QWEN_MODEL",
-      "size_options": ["1024x1024", "1328x1328", "1664x928", "928x1664"]
+      "size_options": [
+        "1024x1024",
+        "1328x1328",
+        "1664x928",
+        "928x1664"
+      ]
+    },
+    {
+      "id": "openrouter",
+      "display_name_zh": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1/images",
+      "default_model": "qwen/qwen-image-2.1-turbo",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "base_url_env": "OPENROUTER_BASE_URL",
+      "model_env": "OPENROUTER_MODEL",
+      "size_options": [
+        "1K",
+        "2K"
+      ],
+      "protocol": "openrouter_images"
+    },
+    {
+      "id": "custom",
+      "display_name_zh": "第三方 / 自定义 API",
+      "base_url": "https://api.example.com/v1/images/edits",
+      "default_model": "your-image-model",
+      "api_key_env": "CUSTOM_API_KEY",
+      "base_url_env": "CUSTOM_BASE_URL",
+      "model_env": "CUSTOM_MODEL",
+      "size_options": [
+        "1024x1024"
+      ],
+      "protocol": "openai_images_edits"
     }
   ]
 }

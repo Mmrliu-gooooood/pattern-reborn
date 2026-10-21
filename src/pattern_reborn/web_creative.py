@@ -1,4 +1,4 @@
-"""Local creative routes, session credentials and revision-safe paid jobs.
+"""Local creative routes, private provider settings and revision-safe paid jobs.
 
 Provider calls run against an isolated copy of the core workflow. Only a
 completed job whose input revision is still current can publish into a project.
@@ -29,7 +29,7 @@ from .config import ConfigError, ProviderConfig, load_provider_config, require_h
 from .domain import StepId
 from .exporter import Exporter, ExportSelection
 from .generation.base import (
-    CredentialMode, FailureKind, GenerationFailure, GenerationRequest, ProviderId,
+    CredentialMode, CustomProtocol, FailureKind, GenerationFailure, GenerationRequest, ProviderId,
     StructureLevel, TargetApplication,
 )
 from .generation.http import USER_MESSAGE_ZH
@@ -37,6 +37,7 @@ from .generation.service import build_generation_service
 from .images import probe_image, save_png_atomic
 from .mockups import load_mockup_catalog
 from .projects import ProjectRepository
+from .provider_store import LocalProvider, LocalSettings, ProviderSettingsStore, SettingsStoreError, apply_local
 from .ui.labels import mockup_template_label
 from .ui.presenters import confirmed_extraction, current_artworks, current_generations, current_mockups, load_analysis
 from .vectorize import Vectorizer
@@ -77,6 +78,14 @@ class SettingsChange(BaseModel):
     api_key: SecretStr | None = None
     base_url: str | None = Field(default=None, min_length=1, max_length=512)
     model: str | None = Field(default=None, min_length=1, max_length=150, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+    protocol: CustomProtocol | None = None
+    size_options: list[str] | None = Field(default=None, min_length=1, max_length=30)
+    default_provider: ProviderId | None = None
+
+    @field_validator("size_options")
+    @classmethod
+    def safe_sizes(cls, values):
+        return LocalProvider.safe_sizes(values) if values is not None else None
 
     @field_validator("base_url")
     @classmethod
@@ -95,6 +104,7 @@ class SettingsChange(BaseModel):
 class GenerationEdit(Revision):
     request_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     provider: ProviderId
+    settings_revision: str | None = Field(default=None, min_length=64, max_length=64)
     prompt: str = Field(min_length=1, max_length=6000)
     model: str | None = Field(default=None, min_length=1, max_length=150)
     size: str = Field(min_length=1, max_length=30)
@@ -127,8 +137,7 @@ class CreativeExport(Revision):
 
 @dataclass
 class _Session:
-    keys: dict[ProviderId, SecretStr] = field(default_factory=dict)
-    overrides: dict[ProviderId, dict[str, str]] = field(default_factory=dict)
+    """Cookie identity owns jobs; credentials belong to the local installation."""
 
 
 @dataclass
@@ -158,10 +167,11 @@ class _Job:
 
 
 def register_creative_routes(app, repository, catalog, lock, current, public, safe_artifact, export_root,
-                             *, generation_factory=None, config_path=None, auto_snapshot=None):
+                             *, generation_factory=None, config_path=None, auto_snapshot=None,
+                             root=None, settings_path=None):
     """Register creative endpoints. ``generation_factory`` is an offline test seam."""
     factory = generation_factory or build_generation_service
-    root = Path(__file__).resolve().parents[2]
+    root = Path(root) if root else Path(__file__).resolve().parents[2]
     config_file = Path(config_path) if config_path else root / "config/providers.json"
     try:
         base_config = load_provider_config(config_file)
@@ -169,6 +179,14 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
     except ConfigError:
         base_config = None
         config_error = "提供方配置无法读取，请检查本地 config/providers.json 和环境变量。"
+    store = ProviderSettingsStore(Path(settings_path) if settings_path else root / ".private/provider-settings.json")
+    local_settings, stored_keys = None, {}
+    settings_error = None
+    try:
+        local_settings = store.load()
+        stored_keys = store.credentials(local_settings)
+    except SettingsStoreError as error:
+        settings_error = str(error)
     sessions: dict[str, _Session] = {}
     jobs: dict[str, _Job] = {}
     templates = load_mockup_catalog()
@@ -195,23 +213,33 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
     def configured(value: _Session) -> ProviderConfig:
         if base_config is None:
             raise HTTPException(503, config_error)
-        config = base_config.model_copy(deep=True)
-        for provider in config.providers:
-            overrides = value.overrides.get(provider.id, {})
-            if "base_url" in overrides:
-                provider.base_url = overrides["base_url"]
-            if "model" in overrides:
-                provider.default_model = overrides["model"]
-        return config
+        if settings_error:
+            raise HTTPException(503, settings_error)
+        return apply_local(base_config, local_settings)
+
+    def platform_available(provider):
+        return (base_config is not None and provider.base_url == base_config.provider(provider.id).base_url
+                and bool(os.environ.get(provider.api_key_env, "").strip()))
+
+    def provider_revision(provider):
+        # Bind per-request consent to the settings the user actually saw.
+        credential = stored_keys.get(provider.id)
+        key_value = credential.get_secret_value() if credential else (
+            os.environ.get(provider.api_key_env, "") if platform_available(provider) else "")
+        payload = provider.model_dump_json() + "\n" + key_value
+        return sha256(payload.encode()).hexdigest()
+
+    def protocol_name(provider):
+        return {ProviderId.SEEDREAM: "seedream_images", ProviderId.QWEN: "qwen_multimodal"}.get(provider.id, provider.protocol.value)
 
     def provider_views(value: _Session):
-        if base_config is None:
+        if base_config is None or settings_error:
             return []
         config = configured(value)
         values = []
         for provider in config.providers:
-            platform = bool(os.environ.get(provider.api_key_env, "").strip())
-            byok = provider.id in value.keys
+            platform = platform_available(provider)
+            byok = provider.id in stored_keys
             # Malformed environment overrides must not become a secret-bearing URL.
             try:
                 endpoint = SettingsChange.safe_endpoint(provider.base_url)
@@ -219,9 +247,10 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
                 endpoint = "[REDACTED]"
             values.append({"id": provider.id.value, "name": provider.display_name_zh,
                            "base_url": endpoint, "model": _redacted(provider.default_model),
+                           "protocol": provider.protocol.value, "settings_revision": provider_revision(provider),
                            "size_options": provider.size_options, "platform_credential": platform,
-                           "session_credential": byok, "available": platform or byok,
-                           "reason": "" if platform or byok else "请在设置中填写本次会话密钥，或配置本地环境变量。",
+                           "stored_credential": byok, "session_credential": byok, "available": platform or byok,
+                           "reason": "" if platform or byok else "请在设置中填写本机密钥，或配置本地环境变量。更换服务地址后需重新填写密钥。",
                            "key_env": provider.api_key_env, "endpoint_env": provider.base_url_env,
                            "model_env": provider.model_env,
                            "capabilities": {"reference_images": 1, "output_count": 1,
@@ -230,14 +259,15 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
 
     def settings_view(value: _Session):
         vector = Vectorizer().capability()
-        return {"providers": provider_views(value), "session_only": True, "config_error": config_error,
+        return {"providers": provider_views(value), "session_only": False, "config_error": config_error or settings_error,
+                "default_provider": apply_local(base_config, local_settings).default_provider.value if base_config else None,
                 "capabilities": {"opencv": {"available": True, "reason": "本地提取和分析可用。"},
                                  "vtracer": {"available": vector.available, "reason": vector.reason_zh},
                                  "mobile_sam": extraction_capabilities(root)["mobile_sam"],
                                  "canvas": {"available": True, "reason": "浏览器画布可用。"}},
                 "setup": ["提取、分析、重组、贴图和 PNG 导出均在本地运行。",
-                          "密钥、服务地址和模型覆盖仅保存在当前浏览器会话的服务进程内存中；重启后清除。",
-                          "长期配置可在本地 .env 中设置提供方环境变量；密钥不会写入项目和导出包。",
+                          "服务设置保存在本机 .private/provider-settings.json；密钥由 Windows 当前用户加密，重启后保留。",
+                          "密钥不回显、不写入浏览器存储、项目、备份或发布包。更换服务地址需重新输入密钥。",
                           "AI 生成会向选定提供方发送参考图和提示词，并可能产生费用；每次提交均需明确确认。",
                           "取消会阻止本地发布；已发送的远程请求可能继续执行并计费。"],
                 "options": {"structure_levels": [value.value for value in StructureLevel],
@@ -294,29 +324,66 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
             _, value = session(request, response)
             return settings_view(value)
 
+    @app.get("/api/providers/openrouter/models")
+    def get_openrouter_models():
+        # An explicit UI action; startup and settings reads stay offline.
+        import httpx
+        from .generation.openrouter_catalog import image_models
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                return {"models": image_models(client), "source": "OpenRouter 官方图像模型目录"}
+        except GenerationFailure:
+            raise HTTPException(502, "暂时无法读取 OpenRouter 图像模型目录；可稍后重试，或手动填写图像模型 ID 与尺寸。") from None
+
     @app.put("/api/settings")
     async def put_settings(request: Request, response: Response):
+        nonlocal local_settings, stored_keys
         # Deliberately validate manually: default 422 bodies echo invalid inputs,
         # which would echo credentials supplied alongside malformed settings.
         try:
             data = SettingsChange.model_validate(await request.json())
             if data.api_key is not None and len(data.api_key.get_secret_value()) > 4096:
                 raise ValueError("invalid credential")
+            if data.api_key is not None and data.api_key.get_secret_value() and not data.api_key.get_secret_value().strip():
+                raise ValueError("invalid credential")
         except (ValidationError, ValueError, TypeError):
             raise HTTPException(400, "设置无效；请检查提供方、HTTPS 服务地址、模型和密钥。") from None
         with lock:
             _, value = session(request, response)
-            configured(value)
-            if "api_key" in data.model_fields_set:
-                if data.api_key is not None and data.api_key.get_secret_value().strip():
-                    value.keys[data.provider] = data.api_key
-                else:
-                    value.keys.pop(data.provider, None)
-            overrides = value.overrides.setdefault(data.provider, {})
-            if data.base_url is not None:
-                overrides["base_url"] = data.base_url
-            if data.model is not None:
-                overrides["model"] = data.model
+            config = configured(value)
+            previous = config.provider(data.provider)
+            endpoint = data.base_url or previous.base_url
+            fresh_key = data.api_key is not None and bool(data.api_key.get_secret_value().strip())
+            destination_changed = endpoint != previous.base_url
+            explicit_clear = "api_key" in data.model_fields_set and data.api_key is not None and data.api_key.get_secret_value() == ""
+            if destination_changed and not fresh_key and not explicit_clear and (data.provider in stored_keys or platform_available(previous)):
+                raise HTTPException(400, "服务地址已变更；请重新填写该地址的 API Key，或先清除本机密钥并确认不使用原环境密钥。")
+            candidate = local_settings.model_copy(deep=True) if local_settings else LocalSettings(
+                default_provider=config.default_provider, providers={})
+            if data.provider is ProviderId.OPENROUTER and data.protocol not in (None, CustomProtocol.OPENROUTER_IMAGES):
+                raise HTTPException(400, "OpenRouter 使用专用 Images 协议；其他接口请使用自定义 API。")
+            existing = candidate.providers.get(data.provider)
+            saved = LocalProvider(base_url=endpoint, model=data.model or previous.default_model,
+                protocol=data.protocol or previous.protocol, size_options=data.size_options or previous.size_options,
+                encrypted_key=existing.encrypted_key if existing and not destination_changed else None,
+                key_endpoint=existing.key_endpoint if existing and not destination_changed else None)
+            keys = dict(stored_keys)
+            try:
+                if data.api_key is not None:
+                    if fresh_key:
+                        saved.encrypted_key = store.encrypt(data.api_key)
+                        saved.key_endpoint = endpoint
+                        keys[data.provider] = data.api_key
+                    else:
+                        saved.encrypted_key = saved.key_endpoint = None
+                        keys.pop(data.provider, None)
+                candidate.providers[data.provider] = saved
+                if data.default_provider is not None:
+                    candidate.default_provider = data.default_provider
+                store.save(candidate)
+            except SettingsStoreError as error:
+                raise HTTPException(503, str(error)) from None
+            local_settings, stored_keys = candidate, keys
             return settings_view(value)
 
     @app.get("/api/projects/{project_id}/analysis")
@@ -475,6 +542,7 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
                     web = dict(staged.processing_parameters.get("web_workspace", {}))
                     inputs = dict(web.get("creative_generations", {}))
                     inputs[relative] = {"reference_id": request_data.reference_path.as_posix(),
+                        "protocol": protocol_name(config.provider(request_data.provider)),
                         "request_id": job.request_id, "size": request_data.size,
                         "structure_level": request_data.structure_level.value,
                         "target_application": request_data.target_application.value,
@@ -526,6 +594,8 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
                 raise HTTPException(400, "请先保存提取结果。")
             config = configured(value)
             provider = config.provider(data.provider)
+            if data.settings_revision != provider_revision(provider):
+                raise HTTPException(409, "生成服务设置已改变，请重新读取设置、核对地址与模型后再次确认本次生成。")
             try:
                 SettingsChange.safe_endpoint(provider.base_url)
             except ValueError:
@@ -534,8 +604,8 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
                 raise HTTPException(400, "模型与当前设置不同，请更新设置后重新提交。")
             if data.size not in provider.size_options:
                 raise HTTPException(400, "当前模型不支持所选输出尺寸。")
-            if data.negative_constraints.strip() and data.provider is ProviderId.SEEDREAM:
-                raise HTTPException(400, "当前 Seedream 接口不支持排除内容，请将要求写入提示词，或选择 Qwen。")
+            if data.negative_constraints.strip() and data.provider is not ProviderId.QWEN:
+                raise HTTPException(400, "当前接口不支持排除内容，请将要求写入提示词，或选择 Qwen。")
             if any(color not in {c.hex_value for c in catalog.colors} for color in data.colors):
                 raise HTTPException(400, "请选择色卡内的传统色彩。")
             references = {a["id"] for a in allowed_artworks(project, references=True).values() if a["kind"] != "mockup"}
@@ -545,14 +615,16 @@ def register_creative_routes(app, repository, catalog, lock, current, public, sa
                 raise HTTPException(400, "参考图必须是当前已确认的提取、重组或生成作品。")
             safe_artifact(project, reference)
             if data.mode is CredentialMode.BYOK:
-                credential = value.keys.get(data.provider)
+                credential = stored_keys.get(data.provider)
                 if credential is None:
-                    raise HTTPException(400, "请先在设置中填写该提供方的会话密钥。")
+                    raise HTTPException(400, "请先在设置中填写该提供方的本机密钥。")
             else:
                 try:
+                    if not platform_available(provider):
+                        raise ConfigError("credential destination changed")
                     credential = config.platform_credential(data.provider)
                 except ConfigError:
-                    raise HTTPException(400, "未配置平台密钥，请选择会话密钥或配置本地环境变量。") from None
+                    raise HTTPException(400, "未配置此地址的平台密钥，请填写本机密钥或检查本地环境变量。") from None
             generation_request = GenerationRequest(prompt=data.prompt, reference_path=Path(reference), model=provider.default_model,
                 provider=data.provider, size=data.size, structure_level=data.structure_level, target_application=data.target_application,
                 colors=data.colors, negative_constraints=data.negative_constraints)

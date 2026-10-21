@@ -14,6 +14,14 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 class ProviderId(str, Enum):
     SEEDREAM = "seedream"
     QWEN = "qwen"
+    CUSTOM = "custom"
+    OPENROUTER = "openrouter"
+
+
+class CustomProtocol(str, Enum):
+    OPENAI_IMAGES_EDITS = "openai_images_edits"
+    IMAGES_GENERATIONS_JSON = "images_generations_json"
+    OPENROUTER_IMAGES = "openrouter_images"
 
 
 class CredentialMode(str, Enum):
@@ -68,7 +76,7 @@ class GenerationRequest(BaseModel):
     reference_path: Path
     model: str = Field(min_length=1)
     provider: ProviderId
-    size: str = Field(pattern=r"^(?:\d+K|\d+x\d+)$")
+    size: str = Field(pattern=r"^(?:\d+(?:\.\d+)?K|\d+x\d+)$")
     count: Literal[1] = 1
     structure_level: StructureLevel
     target_application: TargetApplication

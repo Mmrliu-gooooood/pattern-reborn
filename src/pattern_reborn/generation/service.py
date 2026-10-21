@@ -130,6 +130,7 @@ class GenerationService:
 def build_generation_service(*, config: ProviderConfig, output_dir: Path) -> GenerationService:
     from pattern_reborn.generation.qwen import QwenAdapter
     from pattern_reborn.generation.seedream import SeedreamAdapter
+    from pattern_reborn.generation.custom import CustomImageAdapter
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
@@ -140,5 +141,8 @@ def build_generation_service(*, config: ProviderConfig, output_dir: Path) -> Gen
         ProviderId.SEEDREAM: SeedreamAdapter(client, seedream.base_url, destination),
         ProviderId.QWEN: QwenAdapter(client, qwen.base_url, destination),
     }
+    for identifier in (ProviderId.CUSTOM, ProviderId.OPENROUTER):
+        settings = config.provider(identifier)
+        adapters[identifier] = CustomImageAdapter(client, settings.base_url, destination, settings.protocol, identifier)
     return GenerationService(adapters, ProviderConfigCredentialResolver(config), config=config)
 

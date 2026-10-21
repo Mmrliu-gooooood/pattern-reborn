@@ -29,7 +29,7 @@ def provider_config() -> ProviderConfig:
 def test_provider_config_exposes_both_manual_choices(provider_config) -> None:
     assert provider_config.default_provider == ProviderId.SEEDREAM
     assert {p.id for p in provider_config.providers} == {
-        ProviderId.SEEDREAM, ProviderId.QWEN,
+        ProviderId.SEEDREAM, ProviderId.QWEN, ProviderId.CUSTOM, ProviderId.OPENROUTER,
     }
     assert provider_config.provider(ProviderId.QWEN).default_model == "qwen-image-3.0-pro"
 

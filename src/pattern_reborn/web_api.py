@@ -85,7 +85,7 @@ def _data_url(image: Image.Image) -> str:
     return "data:image/png;base64," + base64.b64encode(_png(image)).decode("ascii")
 
 
-def create_app(workspace: Path | None = None, *, root: Path = ROOT) -> FastAPI:
+def create_app(workspace: Path | None = None, *, root: Path = ROOT, settings_path: Path | None = None) -> FastAPI:
     root = root.resolve()
     repository = ProjectRepository(workspace or Path(os.getenv("PATTERN_REBORN_WORKSPACE", root / "workspace")))
     catalog = KnowledgeCatalog.load(root / "data/knowledge")
@@ -464,7 +464,8 @@ def create_app(workspace: Path | None = None, *, root: Path = ROOT) -> FastAPI:
             return FileResponse(path, filename=record["filename"], media_type={"png": "image/png", "svg": "image/svg+xml", "zip": "application/zip"}[record["format"]])
 
     auto_snapshot = register_project_routes(app, repository, lock, current, public, safe_artifact, export_root)
-    creative_state = register_creative_routes(app, repository, catalog, lock, current, public, safe_artifact, export_root, auto_snapshot=auto_snapshot)
+    creative_state = register_creative_routes(app, repository, catalog, lock, current, public, safe_artifact, export_root,
+        auto_snapshot=auto_snapshot, root=root, settings_path=settings_path)
     app.state.creative = creative_state
 
     @app.get("/api/extraction/capabilities")

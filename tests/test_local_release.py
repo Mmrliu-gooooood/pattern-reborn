@@ -31,7 +31,7 @@ def test_source_selection_excludes_secrets_patch_and_runtime(tmp_path):
     module = script_module("package_local")
     for name in ["src/pkg/module.py", "src/pkg/__pycache__/thing.pyc", "config/.env",
                  "config/local.patch", "config/private-secret.json", "workspace/project.json", "outputs/picture.png",
-                 ".env", ".env.example", "p1-review.patch", "web/dist/client/index.html"]:
+                 ".env", ".env.example", ".private/provider-settings.json", "src/.private/secret.json", "p1-review.patch", "web/dist/client/index.html"]:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("fixture")
@@ -49,7 +49,7 @@ def test_nonempty_example_credentials_stop_packaging(tmp_path):
 def test_verified_upgrade_copies_private_data_and_preserves_old_installation(tmp_path):
     module = script_module("upgrade_local")
     source = tmp_path / "old"
-    for name in ["workspace/project/source.png", "outputs/export.png", "models/weights.bin", "config/providers.json", ".env", ".streamlit/secrets.toml"]:
+    for name in ["workspace/project/source.png", "outputs/export.png", "models/weights.bin", "config/providers.json", ".env", ".streamlit/secrets.toml", ".private/provider-settings.json"]:
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("private-local-data")
@@ -61,6 +61,7 @@ def test_verified_upgrade_copies_private_data_and_preserves_old_installation(tmp
     assert (target / "config/providers.json").read_text() == "private-local-data"
     assert (target / ".env").read_text() == "private-local-data"
     assert (target / ".streamlit/secrets.toml").read_text() == "private-local-data"
+    assert (target / ".private/provider-settings.json").read_text() == "private-local-data"
     assert (source / "outputs/export.png").read_text() == "private-local-data"
 
 

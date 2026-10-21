@@ -23,7 +23,7 @@ DIRECTORIES = ("src", "scripts", "tests", "docs", "data", "assets",
 FILES = ("app.py", "pyproject.toml", "README.md", "CLAUDE.md", "design-qa.md", "THIRD_PARTY_NOTICES.md",
          ".gitignore", ".env.example", ".streamlit/config.toml", "config/providers.json", "web/package.json",
          "web/package-lock.json", "web/index.html", "web/vite.config.js", "web/vite.config.mjs")
-BLOCKED = {"__pycache__", ".cache", "node_modules", ".git", ".venv", "workspace", "outputs", "models"}
+BLOCKED = {"__pycache__", ".cache", "node_modules", ".git", ".venv", ".private", "workspace", "outputs", "models"}
 
 
 def source_files(root: Path) -> dict[str, bytes]:

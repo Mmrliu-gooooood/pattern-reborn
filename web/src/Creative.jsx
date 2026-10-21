@@ -21,12 +21,16 @@ export function Creative({ initial, back, notice, navigate }) {
   const providers = data?.settings?.providers || data?.providers || [];
   const chosenProvider = providers.find(p => p.id === provider);
   const artworks = [...new Map([...(data?.references || []),...(data?.artworks || []),...(data?.mockups || [])].map(a => [a.id,a])).values()], chosen = artworks.find(a => a.id === artwork);
-  async function load(selectNewest = false) {
+  async function load(selectNewest = false, applyDefault = false) {
     try {
       const value = await api(`/projects/${initial.id}/creative`); setData(value); setProject(value.project);
       setArtwork(previous => selectNewest ? value.mockups.at(-1)?.id || value.artworks.at(-1)?.id || previous : [...value.references,...value.artworks,...value.mockups].some(a => a.id === previous) ? previous : value.artworks.find(a => ['pattern','recomposition'].includes(a.kind))?.id || value.artworks[0]?.id || value.references[0]?.id || '');
       setTemplate(t => t || value.templates[0]?.id || '');
-      const ps = value.settings?.providers || value.providers || []; setProvider(p => p || ps[0]?.id || ''); setSize(s => s || ps[0]?.size_options?.[0] || '1024x1024');
+      const ps = value.settings?.providers || value.providers || [];
+      const nextProvider = applyDefault || !provider ? value.settings?.default_provider || ps[0]?.id || '' : provider;
+      const options = ps.find(p => p.id === nextProvider)?.size_options || [];
+      setProvider(nextProvider); setSize(s => options.includes(s) ? s : options[0] || '');
+      if (applyDefault) { setPaid(false); requestId.current = null; }
       const active = value.jobs?.find(j => activeStates.includes(j.status)); if (active) setJob(active);
       return value;
     } catch (e) { setError(e.message); }
@@ -43,9 +47,9 @@ export function Creative({ initial, back, notice, navigate }) {
   }, [job?.id,running,project.id]);
   async function generate() {
     if (busy || running) return; setBusy(true); setError(''); setDownload(null);
-    const fingerprint = JSON.stringify([project.revision,provider,prompt,size,strength,application,negative,artwork,chosenProvider?.session_credential,paid]);
+    const fingerprint = JSON.stringify([project.revision,provider,chosenProvider?.settings_revision,prompt,size,strength,application,negative,artwork,chosenProvider?.stored_credential,paid]);
     const id = requestId.current?.fingerprint === fingerprint ? requestId.current.id : crypto.randomUUID(); requestId.current = {id,fingerprint};
-    try { const value = await api(`/projects/${project.id}/generation`, {method:'POST',body:JSON.stringify({revision:project.revision,request_id:id,provider,prompt,size,structure_level:strength,target_application:application,negative_constraints:chosenProvider?.capabilities?.negative_constraints ? negative : '',colors:[],reference_id:artwork,mode:chosenProvider?.session_credential ? 'byok' : 'platform',paid_confirmed:paid})}); setJob(value.job); requestId.current = null; setPaid(false); }
+    try { const value = await api(`/projects/${project.id}/generation`, {method:'POST',body:JSON.stringify({revision:project.revision,request_id:id,provider,settings_revision:chosenProvider?.settings_revision,prompt,size,structure_level:strength,target_application:application,negative_constraints:chosenProvider?.capabilities?.negative_constraints ? negative : '',colors:[],reference_id:artwork,mode:chosenProvider?.stored_credential ? 'byok' : 'platform',paid_confirmed:paid})}); setJob(value.job); requestId.current = null; setPaid(false); }
     catch(e) { setError(e.message); } finally { setBusy(false); }
   }
   async function cancel() { try { const value = await api(`/projects/${project.id}/generation/jobs/${job.id}/cancel`,{method:'POST'}); setJob(value.job || value); } catch(e) { setError(e.message); } }
@@ -84,7 +88,7 @@ export function Creative({ initial, back, notice, navigate }) {
       {job && <section className="job-status" role="status"><strong>{statusNames[job.status] || job.status}</strong><p>{job.error || job.message || ''}</p>{running && <button className="text-button" onClick={cancel}>取消并丢弃结果</button>}</section>}
       <div className="creative-export"><h3>当前作品</h3><div className="settings-actions"><button className="outline" disabled={busy || running || !artwork} onClick={() => exportFile('png')}>导出 PNG</button><button className="outline" disabled={busy || running || !artwork} onClick={() => exportFile('zip')}>导出来源包</button></div>{download && <a className="download-link" href={download.url} download><DownloadSimple size={18} />下载 {download.format.toUpperCase()}</a>}</div>
       <button className="text-button" disabled={busy || running} onClick={analyze}>查看纹样分析</button>{showAnalysis && <Analysis data={analysis} />}
-    </aside>{settings && <Settings close={() => {setSettings(false);load();}} />}
+    </aside>{settings && <Settings close={() => {setSettings(false);load(false,true);}} />}
   </div>;
 }
 
